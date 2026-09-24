@@ -1,0 +1,211 @@
+// CivicLens — Prisma Schema
+// REPORT = individual citizen submission. INCIDENT = the physical problem.
+// One INCIDENT links many REPORTs (incident clustering / duplicate detection).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String         @id @default(cuid())
+  publicId      String         @unique
+  name          String
+  email         String?        @unique
+  role          String         @default("CITIZEN") // CITIZEN | ADMIN
+  city          String?
+  isDemo        Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  reports       Report[]
+  notifications Notification[]
+  statusHistory StatusHistory[]
+}
+
+model Category {
+  id              String     @id @default(cuid())
+  key             String     @unique // e.g. "pothole"
+  label           String // e.g. "Pothole / Road Damage"
+  departmentKey   String // routing: category -> department
+  defaultSeverity Int        @default(5)
+  hazardWeight    Float      @default(1.0) // priority engine weight
+  sortOrder       Int        @default(0)
+  active          Boolean    @default(true)
+  incidents       Incident[]
+}
+
+model Department {
+  id          String       @id @default(cuid())
+  key         String       @unique // e.g. "roads"
+  name        String // e.g. "Roads / PWD"
+  description String       @default("")
+  incidents   Incident[]
+  assignments Assignment[]
+}
+
+model Report {
+  id                  String         @id @default(cuid())
+  publicId            String         @unique // REP-0001
+  incidentId          String?
+  incident            Incident?      @relation(fields: [incidentId], references: [id])
+  userId              String
+  user                User           @relation(fields: [userId], references: [id])
+  imagePath           String?
+  imageHash           String? // future: perceptual hash / anti-spam
+  description         String?
+  latitude            Float
+  longitude           Float
+  captureTimestamp    DateTime
+  submissionTimestamp DateTime       @default(now())
+  aiAnalysisId        String?        @unique // kept as plain scalar mirror (FK lives on AiAnalysis.reportId)
+  aiAnalysis          AiAnalysis?    @relation()
+  processingState     String         @default("PENDING") // PENDING | PROCESSING | COMPLETED | FAILED
+  idempotencyKey      String?        @unique // prevents duplicate AI calls / submissions
+  locationChanged     Boolean        @default(false)
+  isDemo              Boolean        @default(false)
+  createdAt           DateTime       @default(now())
+  incidentLinks       IncidentReport[]
+
+  @@index([userId])
+  @@index([incidentId])
+}
+
+model Incident {
+  id                  String              @id @default(cuid())
+  publicId            String              @unique // INC-1001
+  categoryKey         String
+  category            Category            @relation(fields: [categoryKey], references: [key])
+  title               String?
+  severity            String              @default("MEDIUM") // LOW | MEDIUM | HIGH | CRITICAL | UNKNOWN
+  severityScore       Int                 @default(5) // 1-10
+  priority            String              @default("P3") // P1 | P2 | P3 | P4
+  priorityScore       Int                 @default(0)
+  priorityReasons     String              @default("[]") // JSON string array (explainable)
+  aiConfidence        Float?
+  aiReasoning         String?
+  departmentKey       String?
+  department          Department?         @relation(fields: [departmentKey], references: [key])
+  latitude            Float
+  longitude           Float
+  address             String?
+  city                String?
+  district            String?
+  state               String?
+  status              String              @default("REPORTED") // REPORTED | VERIFIED | ASSIGNED | IN_PROGRESS | RESOLVED | REJECTED
+  reportCount         Int                 @default(1)
+  isDemo              Boolean             @default(false)
+  resolutionNote      String?
+  resolvedAt          DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  reports             Report[]
+  statusHistory       StatusHistory[]
+  assignments         Assignment[]
+  notifications       Notification[]
+  resolutionEvidences ResolutionEvidence[]
+  incidentReports     IncidentReport[]
+
+  @@index([status])
+  @@index([categoryKey])
+  @@index([city])
+  @@index([priority])
+  @@index([departmentKey])
+  @@index([latitude, longitude])
+}
+
+// Immutable link log: which reports belong to which physical incident, and how
+model IncidentReport {
+  id         String   @id @default(cuid())
+  incidentId String
+  incident   Incident @relation(fields: [incidentId], references: [id])
+  reportId   String
+  report     Report   @relation(fields: [reportId], references: [id])
+  linkType   String // CREATED (first report) | LINKED (merged duplicate)
+  createdAt  DateTime @default(now())
+
+  @@index([incidentId])
+}
+
+model AiAnalysis {
+  id                String   @id @default(cuid())
+  reportId          String?  @unique
+  report            Report?  @relation(fields: [reportId], references: [id])
+  model             String
+  source            String   @default("VLM_SDK") // VLM_SDK | GEMINI | DEMO_PRECOMPUTED | FALLBACK_MANUAL
+  isCivicIssue      Boolean  @default(true)
+  categoryKey       String   @default("other")
+  confidence        Float    @default(0)
+  severity          String   @default("UNKNOWN")
+  severityScore     Int      @default(0)
+  hazards           String   @default("[]") // JSON string array
+  departmentKey     String   @default("general")
+  description       String   @default("")
+  reasoning         String   @default("")
+  recommendedAction String   @default("")
+  rawResult         String   @default("{}") // full structured JSON for observability
+  processingMs      Int?
+  createdAt         DateTime @default(now())
+}
+
+model StatusHistory {
+  id         String    @id @default(cuid())
+  incidentId String
+  incident   Incident  @relation(fields: [incidentId], references: [id])
+  fromStatus String?
+  toStatus   String
+  actorId    String?
+  actor      User?     @relation(fields: [actorId], references: [id])
+  actorRole  String?
+  note       String?
+  createdAt  DateTime  @default(now())
+
+  @@index([incidentId])
+}
+
+model Assignment {
+  id             String     @id @default(cuid())
+  incidentId     String
+  incident       Incident   @relation(fields: [incidentId], references: [id])
+  departmentKey  String
+  department     Department @relation(fields: [departmentKey], references: [key])
+  team           String?
+  assignedToName String?
+  assignedById   String?
+  note           String?
+  active         Boolean    @default(true)
+  createdAt      DateTime   @default(now())
+
+  @@index([incidentId])
+  @@index([departmentKey])
+}
+
+model Notification {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+  incidentId String?
+  incident   Incident? @relation(fields: [incidentId], references: [id])
+  type       String // REPORT_SUBMITTED | LINKED | STATUS_CHANGE | ASSIGNED | RESOLVED | SYSTEM
+  title      String
+  body       String
+  isRead     Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, isRead])
+}
+
+model ResolutionEvidence {
+  id           String   @id @default(cuid())
+  incidentId   String
+  incident     Incident @relation(fields: [incidentId], references: [id])
+  imagePath    String
+  note         String?
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  @@index([incidentId])
+}

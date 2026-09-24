@@ -1,0 +1,995 @@
+     1→"use client";
+     2→
+     3→// CivicLens — citizen report wizard:
+     4→// PHOTO → LOCATION → DESCRIPTION → AI ANALYSIS → REVIEW → DUPLICATE CHECK → SUCCESS
+     5→// Mobile-first, minimal typing, graceful fallbacks at every step.
+     6→
+     7→import { useCallback, useEffect, useRef, useState } from "react";
+     8→import dynamic from "next/dynamic";
+     9→import { useCivicLens } from "@/store/civiclens";
+    10→import { Button } from "@/components/ui/button";
+    11→import { Card, CardContent } from "@/components/ui/card";
+    12→import { Textarea } from "@/components/ui/textarea";
+    13→import { Label } from "@/components/ui/label";
+    14→import { Progress } from "@/components/ui/progress";
+    15→import { Badge } from "@/components/ui/badge";
+    16→import {
+    17→  Select,
+    18→  SelectContent,
+    19→  SelectItem,
+    20→  SelectTrigger,
+    21→  SelectValue,
+    22→} from "@/components/ui/select";
+    23→import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+    24→import {
+    25→  analyzeReport,
+    26→  compressImage,
+    27→  reverseGeocode,
+    28→  searchLocations,
+    29→  submitReport,
+    30→  ApiError,
+    31→} from "@/lib/civiclens/api";
+    32→import type {
+    33→  CivicAnalysis,
+    34→  DuplicateCandidate,
+    35→  IncidentSummary,
+    36→  ReverseGeocodeResult,
+    37→} from "@/lib/civiclens/types";
+    38→import { formatDistance, haversineMeters } from "@/lib/civiclens/geo";
+    39→import { INDIAN_CITIES } from "@/lib/civiclens/constants";
+    40→import { Photo } from "../photo";
+    41→import { CategoryIcon, HazardChip, PriorityBadge, SeverityBadge, DemoBadge } from "../badges";
+    42→import { locationLine, timeAgo } from "@/lib/civiclens/format";
+    43→import { useToast } from "@/hooks/use-toast";
+    44→import { cn } from "@/lib/utils";
+    45→import {
+    46→  Camera,
+    47→  CheckCircle2,
+    48→  ChevronDown,
+    49→  ChevronLeft,
+    50→  CircleAlert,
+    51→  ImagePlus,
+    52→  Loader2,
+    53→  LocateFixed,
+    54→  MapPin,
+    55→  MapPinned,
+    56→  Pencil,
+    57→  Plus,
+    58→  RefreshCcw,
+    59→  ScanSearch,
+    60→  Search,
+    61→  ShieldCheck,
+    62→  Sparkles,
+    63→  Upload,
+    64→} from "lucide-react";
+    65→
+    66→const LocationPicker = dynamic(
+    67→  () => import("../map").then((m) => m.LocationPicker),
+    68→  { ssr: false, loading: () => <div className="h-64 w-full animate-pulse rounded-xl bg-muted" /> }
+    69→);
+    70→
+    71→type Step = "photo" | "location" | "details" | "analyzing" | "review" | "duplicate" | "success";
+    72→
+    73→const ANALYSIS_STAGES = [
+    74→  "Uploading & optimizing image…",
+    75→  "Analyzing image with AI…",
+    76→  "Identifying civic issue…",
+    77→  "Assessing severity…",
+    78→  "Checking potential hazards…",
+    79→  "Preparing incident intelligence…",
+    80→];
+    81→
+    82→export function ReportWizard() {
+    83→  const { user, openAuth, samples, categories, departments, setView } = useCivicLens();
+    84→  const { toast } = useToast();
+    85→
+    86→  const [step, setStep] = useState<Step>("photo");
+    87→  const [file, setFile] = useState<File | null>(null);
+    88→  const [fileUrl, setFileUrl] = useState<string | null>(null);
+    89→  const [sampleKey, setSampleKey] = useState<string | null>(null);
+    90→  const [samplePath, setSamplePath] = useState<string | null>(null);
+    91→  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+    92→
+    93→  const [gpsState, setGpsState] = useState<"idle" | "locating" | "ok" | "denied">("idle");
+    94→  const [captureLat, setCaptureLat] = useState<number | null>(null);
+    95→  const [captureLng, setCaptureLng] = useState<number | null>(null);
+    96→  const [finalLat, setFinalLat] = useState<number | null>(null);
+    97→  const [finalLng, setFinalLng] = useState<number | null>(null);
+    98→  const [captureTimestamp, setCaptureTimestamp] = useState<string | null>(null);
+    99→  const [geo, setGeo] = useState<ReverseGeocodeResult | null>(null);
+   100→  const [geoLoading, setGeoLoading] = useState(false);
+   101→  const [searchQ, setSearchQ] = useState("");
+   102→  const [searchHits, setSearchHits] = useState<{ display: string; lat: number; lng: number }[]>([]);
+   103→
+   104→  const [description, setDescription] = useState("");
+   105→
+   106→  const [analysis, setAnalysis] = useState<CivicAnalysis | null>(null);
+   107→  const [reportId, setReportId] = useState<string | null>(null);
+   108→  const [reportPublicId, setReportPublicId] = useState<string | null>(null);
+   109→  const [stageIndex, setStageIndex] = useState(0);
+   110→  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+   111→
+   112→  const [editing, setEditing] = useState(false);
+   113→  const [categoryOverride, setCategoryOverride] = useState<string | null>(null);
+   114→  const [submitting, setSubmitting] = useState(false);
+   115→
+   116→  const [candidates, setCandidates] = useState<DuplicateCandidate[]>([]);
+   117→  const [result, setResult] = useState<{ incident: IncidentSummary; linked: boolean } | null>(null);
+   118→
+   119→  const fileInputRef = useRef<HTMLInputElement>(null);
+   120→  const cameraInputRef = useRef<HTMLInputElement>(null);
+   121→
+   122→  // guard: require citizen session
+   123→  useEffect(() => {
+   124→    if (!user) openAuth("report");
+   125→  }, [user, openAuth]);
+   126→
+   127→  // ---- photo handling (client-side compression before upload / AI) ----
+   128→  const onPhotoChosen = useCallback(async (f: File) => {
+   129→    setAnalyzeError(null);
+   130→    const compressed = await compressImage(f);
+   131→    setFile(compressed);
+   132→    setSampleKey(null);
+   133→    setSamplePath(null);
+   134→    setFileUrl(URL.createObjectURL(compressed));
+   135→    // a new photo means a new report identity
+   136→    setIdempotencyKey(crypto.randomUUID());
+   137→    setAnalysis(null);
+   138→    setReportId(null);
+   139→    setReportPublicId(null);
+   140→  }, []);
+   141→
+   142→  const pickSample = useCallback((key: string, path: string) => {
+   143→    setAnalyzeError(null);
+   144→    setFile(null);
+   145→    setFileUrl(null);
+   146→    setSampleKey(key);
+   147→    setSamplePath(path);
+   148→    setIdempotencyKey(crypto.randomUUID());
+   149→    setAnalysis(null);
+   150→    setReportId(null);
+   151→    setReportPublicId(null);
+   152→  }, []);
+   153→
+   154→  // ---- GPS ----
+   155→  const applyGeocode = useCallback(async (lat: number, lng: number) => {
+   156→    setGeoLoading(true);
+   157→    const result = await reverseGeocode(lat, lng);
+   158→    setGeo(result); // null → coordinates-only fallback
+   159→    setGeoLoading(false);
+   160→  }, []);
+   161→
+   162→  const requestGps = useCallback(() => {
+   163→    if (!("geolocation" in navigator)) {
+   164→      setGpsState("denied");
+   165→      return;
+   166→    }
+   167→    setGpsState("locating");
+   168→    navigator.geolocation.getCurrentPosition(
+   169→      (pos) => {
+   170→        const { latitude, longitude } = pos.coords;
+   171→        setGpsState("ok");
+   172→        setCaptureLat(latitude);
+   173→        setCaptureLng(longitude);
+   174→        setFinalLat(latitude);
+   175→        setFinalLng(longitude);
+   176→        setCaptureTimestamp(new Date(pos.timestamp || Date.now()).toISOString());
+   177→        void applyGeocode(latitude, longitude);
+   178→      },
+   179→      () => setGpsState("denied"),
+   180→      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+   181→    );
+   182→  }, [applyGeocode]);
+   183→
+   184→  useEffect(() => {
+   185→    if (step === "location" && gpsState === "idle") requestGps();
+   186→  }, [step, gpsState, requestGps]);
+   187→
+   188→  const onManualLocation = useCallback(
+   189→    (lat: number, lng: number) => {
+   190→      setFinalLat(lat);
+   191→      setFinalLng(lng);
+   192→      void applyGeocode(lat, lng);
+   193→    },
+   194→    [applyGeocode]
+   195→  );
+   196→
+   197→  const locationChanged =
+   198→    captureLat != null &&
+   199→    captureLng != null &&
+   200→    finalLat != null &&
+   201→    finalLng != null &&
+   202→    haversineMeters(captureLat, captureLng, finalLat, finalLng) > 50;
+   203→
+   204→  // ---- run AI analysis (once per report — server enforces idempotency) ----
+   205→  const runAnalysis = useCallback(async () => {
+   206→    if (finalLat == null || finalLng == null) return;
+   207→    setStep("analyzing");
+   208→    setStageIndex(0);
+   209→    setAnalyzeError(null);
+   210→    const timer = setInterval(() => {
+   211→      setStageIndex((i) => Math.min(i + 1, ANALYSIS_STAGES.length - 1));
+   212→    }, 2200);
+   213→    try {
+   214→      const res = await analyzeReport({
+   215→        file,
+   216→        sampleKey,
+   217→        idempotencyKey,
+   218→        latitude: finalLat,
+   219→        longitude: finalLng,
+   220→        captureTimestamp: captureTimestamp ?? new Date().toISOString(),
+   221→        description: description.trim() || undefined,
+   222→      });
+   223→      clearInterval(timer);
+   224→      setStageIndex(ANALYSIS_STAGES.length - 1);
+   225→      setAnalysis(res.analysis);
+   226→      setReportId(res.reportId);
+   227→      setReportPublicId(res.reportPublicId);
+   228→      setCandidates(res.duplicateCandidates ?? []);
+   229→      setCategoryOverride(res.analysis.source === "FALLBACK_MANUAL" ? null : res.analysis.categoryKey);
+   230→      setEditing(res.analysis.source === "FALLBACK_MANUAL" || !res.analysis.isCivicIssue);
+   231→      setTimeout(() => setStep("review"), 450);
+   232→    } catch (err) {
+   233→      clearInterval(timer);
+   234→      const message = err instanceof ApiError ? err.message : "Analysis failed. Please try again.";
+   235→      if (err instanceof ApiError && err.status === 409) {
+   236→        // still processing the same report — wait briefly and retry once
+   237→        setTimeout(() => void runAnalysis(), 2500);
+   238→        return;
+   239→      }
+   240→      setAnalyzeError(message);
+   241→      setStep("details"); // let the citizen retry; nothing is lost
+   242→      toast({
+   243→        title: "AI analysis unavailable",
+   244→        description: message + " You can retry — your photo, location and description are preserved.",
+   245→        variant: "destructive",
+   246→      });
+   247→    }
+   248→  }, [file, sampleKey, idempotencyKey, finalLat, finalLng, captureTimestamp, description, toast]);
+   249→
+   250→  // ---- submit (duplicate check → link or create) ----
+   251→  const doSubmit = useCallback(
+   252→    async (decision?: "link" | "new", linkToIncidentPublicId?: string) => {
+   253→      if (!reportId) return;
+   254→      setSubmitting(true);
+   255→      try {
+   256→        const res = await submitReport({
+   257→          reportId,
+   258→          categoryKey: categoryOverride ?? analysis?.categoryKey,
+   259→          description: description.trim() || undefined,
+   260→          latitude: finalLat ?? undefined,
+   261→          longitude: finalLng ?? undefined,
+   262→          address: geo,
+   263→          locationChanged,
+   264→          decision,
+   265→          linkToIncidentPublicId,
+   266→        });
+   267→        if (res.requiresDecision) {
+   268→          setCandidates(res.duplicateCandidates ?? []);
+   269→          setStep("duplicate");
+   270→          return;
+   271→        }
+   272→        setResult({ incident: res.incident, linked: res.linked });
+   273→        setStep("success");
+   274→      } catch (err) {
+   275→        toast({
+   276→          title: "Submission failed",
+   277→          description: err instanceof ApiError ? err.message : "Please try again — your report is safe.",
+   278→          variant: "destructive",
+   279→        });
+   280→      } finally {
+   281→        setSubmitting(false);
+   282→      }
+   283→    },
+   284→    [reportId, categoryOverride, analysis, description, finalLat, finalLng, geo, locationChanged, toast]
+   285→  );
+   286→
+   287→  const resetWizard = useCallback(() => {
+   288→    setStep("photo");
+   289→    setFile(null);
+   290→    setFileUrl(null);
+   291→    setSampleKey(null);
+   292→    setSamplePath(null);
+   293→    setIdempotencyKey(crypto.randomUUID());
+   294→    setGpsState("idle");
+   295→    setCaptureLat(null);
+   296→    setCaptureLng(null);
+   297→    setFinalLat(null);
+   298→    setFinalLng(null);
+   299→    setGeo(null);
+   300→    setDescription("");
+   301→    setAnalysis(null);
+   302→    setReportId(null);
+   303→    setReportPublicId(null);
+   304→    setCategoryOverride(null);
+   305→    setEditing(false);
+   306→    setCandidates([]);
+   307→    setResult(null);
+   308→  }, []);
+   309→
+   310→  const hasPhoto = Boolean(file || samplePath);
+   311→  const activeCategoryKey = categoryOverride ?? analysis?.categoryKey ?? "other";
+   312→  const activeCategory = categories.find((c) => c.key === activeCategoryKey);
+   313→  const activeDepartment = departments.find((d) => d.key === (analysis?.departmentKey ?? activeCategory?.departmentKey));
+   314→
+   315→  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+   316→  useEffect(() => {
+   317→    if (searchTimer.current) clearTimeout(searchTimer.current);
+   318→    if (searchQ.trim().length < 3) {
+   319→      setSearchHits([]);
+   320→      return;
+   321→    }
+   322→    searchTimer.current = setTimeout(async () => {
+   323→      const hits = await searchLocations(searchQ.trim());
+   324→      setSearchHits(hits);
+   325→    }, 500);
+   326→  }, [searchQ]);
+   327→
+   328→  // ---------- renders ----------
+   329→
+   330→  if (!user) {
+   331→    return (
+   332→      <div className="mx-auto flex max-w-md flex-col items-center gap-4 px-4 py-16 text-center">
+   333→        <ScanSearch className="h-10 w-10 text-primary" />
+   334→        <p className="font-medium">Sign in to report an issue</p>
+   335→        <Button onClick={() => openAuth("report")}>Sign in</Button>
+   336→      </div>
+   337→    );
+   338→  }
+   339→
+   340→  return (
+   341→    <div className="mx-auto w-full max-w-xl px-4 pb-16 pt-6">
+   342→      {/* step header */}
+   343→      {step !== "analyzing" && step !== "success" ? (
+   344→        <div className="mb-5">
+   345→          <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+   346→            <span className="font-medium uppercase tracking-wide">
+   347→              {step === "photo" && "Step 1 of 4 · Evidence"}
+   348→              {step === "location" && "Step 2 of 4 · Location"}
+   349→              {step === "details" && "Step 3 of 4 · Details"}
+   350→              {step === "review" && "Step 4 of 4 · AI review & submit"}
+   351→              {step === "duplicate" && "Duplicate check"}
+   352→            </span>
+   353→            {reportPublicId ? <span className="font-mono">{reportPublicId}</span> : null}
+   354→          </div>
+   355→          <Progress
+   356→            value={
+   357→              step === "photo" ? 8 : step === "location" ? 30 : step === "details" ? 52 : step === "review" ? 78 : 90
+   358→            }
+   359→            className="h-1.5"
+   360→          />
+   361→        </div>
+   362→      ) : null}
+   363→
+   364→      {/* ---------------- PHOTO ---------------- */}
+   365→      {step === "photo" ? (
+   366→        <div className="space-y-5">
+   367→          <div>
+   368→            <h1 className="text-xl font-bold">What did you see?</h1>
+   369→            <p className="mt-1 text-sm text-muted-foreground">
+   370→              A clear photo is all CivicLens needs — our AI identifies the issue, severity and hazards.
+   371→            </p>
+   372→          </div>
+   373→
+   374→          {hasPhoto ? (
+   375→            <Card className="overflow-hidden">
+   376→              <div className="relative aspect-video bg-muted">
+   377→                {fileUrl ? (
+   378→                  <Photo src={fileUrl} alt="Your report photo preview" fill className="object-cover" />
+   379→                ) : samplePath ? (
+   380→                  <Photo src={samplePath} alt="Sample civic issue photo" fill className="object-cover" />
+   381→                ) : null}
+   382→                {sampleKey ? (
+   383→                  <span className="absolute left-2 top-2">
+   384→                    <DemoBadge />
+   385→                  </span>
+   386→                ) : null}
+   387→              </div>
+   388→              <CardContent className="flex items-center justify-between gap-2 p-3">
+   389→                <p className="text-xs text-muted-foreground">
+   390→                  {sampleKey
+   391→                    ? "Sample photo — precomputed demo analysis will be used (zero AI quota)."
+   392→                    : `Photo ready · ${(file ? file.size / 1024 : 0).toFixed(0)} KB after compression`}
+   393→                </p>
+   394→                <Button variant="outline" size="sm" onClick={() => { setFile(null); setFileUrl(null); setSampleKey(null); setSamplePath(null); }}>
+   395→                  <RefreshCcw className="mr-1 h-3.5 w-3.5" /> Change
+   396→                </Button>
+   397→              </CardContent>
+   398→            </Card>
+   399→          ) : (
+   400→            <div className="grid grid-cols-2 gap-3">
+   401→              <button
+   402→                onClick={() => cameraInputRef.current?.click()}
+   403→                className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed p-6 text-center transition-colors hover:border-primary/60 hover:bg-primary/5"
+   404→              >
+   405→                <Camera className="h-7 w-7 text-primary" />
+   406→                <span className="text-sm font-semibold">Take a photo</span>
+   407→                <span className="text-xs text-muted-foreground">Opens your camera</span>
+   408→              </button>
+   409→              <button
+   410→                onClick={() => fileInputRef.current?.click()}
+   411→                className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed p-6 text-center transition-colors hover:border-primary/60 hover:bg-primary/5"
+   412→              >
+   413→                <Upload className="h-7 w-7 text-primary" />
+   414→                <span className="text-sm font-semibold">Upload photo</span>
+   415→                <span className="text-xs text-muted-foreground">JPEG / PNG / WebP</span>
+   416→              </button>
+   417→            </div>
+   418→          )}
+   419→
+   420→          <input
+   421→            ref={cameraInputRef}
+   422→            type="file"
+   423→            accept="image/*"
+   424→            capture="environment"
+   425→            className="hidden"
+   426→            aria-label="Take a photo with camera"
+   427→            onChange={(e) => {
+   428→              const f = e.target.files?.[0];
+   429→              if (f) void onPhotoChosen(f);
+   430→              e.target.value = "";
+   431→            }}
+   432→          />
+   433→          <input
+   434→            ref={fileInputRef}
+   435→            type="file"
+   436→            accept="image/jpeg,image/png,image/webp"
+   437→            className="hidden"
+   438→            aria-label="Upload a photo"
+   439→            onChange={(e) => {
+   440→              const f = e.target.files?.[0];
+   441→              if (f) void onPhotoChosen(f);
+   442→              e.target.value = "";
+   443→            }}
+   444→          />
+   445→
+   446→          <div>
+   447→            <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+   448→              <ImagePlus className="h-3.5 w-3.5" /> No civic issue handy? Use a sample photo for demo:
+   449→            </p>
+   450→            <div className="cl-scroll -mx-1 flex gap-2 overflow-x-auto px-1 pb-2">
+   451→              {samples.map((s) => (
+   452→                <button
+   453→                  key={s.key}
+   454→                  onClick={() => pickSample(s.key, s.path)}
+   455→                  className={cn(
+   456→                    "group relative w-24 shrink-0 overflow-hidden rounded-lg border-2 transition-all",
+   457→                    sampleKey === s.key ? "border-primary ring-2 ring-primary/30" : "border-transparent hover:border-primary/50"
+   458→                  )}
+   459→                  aria-label={`Use sample photo: ${s.label}`}
+   460→                >
+   461→                  <span className="block aspect-square">
+   462→                    <Photo src={s.path} alt={`${s.label} sample`} width={96} height={96} className="h-full w-full object-cover" />
+   463→                  </span>
+   464→                  <span className="block bg-background/90 px-1 py-1 text-[11px] font-medium leading-tight">{s.label}</span>
+   465→                </button>
+   466→              ))}
+   467→            </div>
+   468→          </div>
+   469→
+   470→          {analyzeError ? (
+   471→            <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+   472→              <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+   473→              <span>{analyzeError}</span>
+   474→            </div>
+   475→          ) : null}
+   476→
+   477→          <Button className="h-12 w-full text-base" size="lg" disabled={!hasPhoto} onClick={() => setStep("location")}>
+   478→            Next: Location <ChevronDown className="ml-1 h-4 w-4 -rotate-90" />
+   479→          </Button>
+   480→        </div>
+   481→      ) : null}
+   482→
+   483→      {/* ---------------- LOCATION ---------------- */}
+   484→      {step === "location" ? (
+   485→        <div className="space-y-5">
+   486→          <div>
+   487→            <h1 className="text-xl font-bold">Where is the issue?</h1>
+   488→            <p className="mt-1 text-sm text-muted-foreground">
+   489→              We use your location only to place this report on the map and route it to the right authority.
+   490→            </p>
+   491→          </div>
+   492→
+   493→          {gpsState === "locating" ? (
+   494→            <div className="flex items-center gap-3 rounded-xl border p-4">
+   495→              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+   496→              <div className="text-sm">
+   497→                <p className="font-medium">Capturing GPS location…</p>
+   498→                <p className="text-muted-foreground">Allow location access when prompted.</p>
+   499→              </div>
+   500→            </div>
+   501→          ) : null}
+   502→
+   503→          {gpsState === "ok" ? (
+   504→            <div className="flex items-start gap-3 rounded-xl border border-emerald-300 bg-emerald-50 p-4 dark:border-emerald-800 dark:bg-emerald-950">
+   505→              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+   506→              <div className="min-w-0 text-sm">
+   507→                <p className="font-semibold text-emerald-800 dark:text-emerald-300">GPS location captured</p>
+   508→                {geoLoading ? (
+   509→                  <p className="text-emerald-700 dark:text-emerald-400">Looking up address…</p>
+   510→                ) : geo ? (
+   511→                  <p className="text-emerald-700 dark:text-emerald-400">{geo.display}</p>
+   512→                ) : (
+   513→                  <p className="text-emerald-700 dark:text-emerald-400">
+   514→                    Coordinates: {finalLat?.toFixed(5)}, {finalLng?.toFixed(5)} (address lookup unavailable — coordinates will be used)
+   515→                  </p>
+   516→                )}
+   517→              </div>
+   518→            </div>
+   519→          ) : null}
+   520→
+   521→          {gpsState === "denied" ? (
+   522→            <div className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
+   523→              <div className="flex items-start gap-2 text-sm">
+   524→                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+   525→                <div>
+   526→                  <p className="font-semibold text-amber-800 dark:text-amber-300">Location permission unavailable</p>
+   527→                  <p className="text-amber-700 dark:text-amber-400">
+   528→                    No problem — search for a place or tap the map to set the location manually.
+   529→                  </p>
+   530→                </div>
+   531→              </div>
+   532→              <Button variant="outline" size="sm" onClick={requestGps}>
+   533→                <LocateFixed className="mr-1 h-3.5 w-3.5" /> Try GPS again
+   534→              </Button>
+   535→            </div>
+   536→          ) : null}
+   537→
+   538→          {finalLat != null && finalLng != null ? (
+   539→            <div className="space-y-2">
+   540→              <LocationPicker latitude={finalLat} longitude={finalLng} onPick={onManualLocation} />
+   541→              <p className="text-center text-xs text-muted-foreground">
+   542→                <MapPin className="mr-1 inline h-3 w-3" />
+   543→                Drag the pin or tap the map to fine-tune · {finalLat.toFixed(5)}, {finalLng.toFixed(5)}
+   544→              </p>
+   545→              {locationChanged ? (
+   546→                <p className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-center text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+   547→                  Location changed from the original capture position — your adjusted location will be used.
+   548→                </p>
+   549→              ) : null}
+   550→            </div>
+   551→          ) : (
+   552→            <div className="space-y-3">
+   553→              <div className="relative">
+   554→                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+   555→                <input
+   556→                  className="h-11 w-full rounded-xl border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+   557→                  placeholder="Search a place (e.g. 'Collectorate, Alwar')…"
+   558→                  value={searchQ}
+   559→                  onChange={(e) => setSearchQ(e.target.value)}
+   560→                  aria-label="Search location"
+   561→                />
+   562→              </div>
+   563→              {searchHits.length > 0 ? (
+   564→                <ul className="cl-scroll max-h-48 divide-y overflow-y-auto rounded-xl border">
+   565→                  {searchHits.map((h, i) => (
+   566→                    <li key={i}>
+   567→                      <button
+   568→                        className="w-full px-3 py-2.5 text-left text-sm hover:bg-accent"
+   569→                        onClick={() => {
+   570→                          setFinalLat(h.lat);
+   571→                          setFinalLng(h.lng);
+   572→                          setCaptureLat(h.lat);
+   573→                          setCaptureLng(h.lng);
+   574→                          setCaptureTimestamp(new Date().toISOString());
+   575→                          void applyGeocode(h.lat, h.lng);
+   576→                        }}
+   577→                      >
+   578→                        {h.display}
+   579→                      </button>
+   580→                    </li>
+   581→                  ))}
+   582→                </ul>
+   583→              ) : null}
+   584→              <div>
+   585→                <p className="mb-2 text-xs font-medium text-muted-foreground">Or pick a city centre:</p>
+   586→                <div className="flex flex-wrap gap-2">
+   587→                  {INDIAN_CITIES.map((c) => (
+   588→                    <Button
+   589→                      key={c.city}
+   590→                      variant="outline"
+   591→                      size="sm"
+   592→                      onClick={() => {
+   593→                        setFinalLat(c.lat);
+   594→                        setFinalLng(c.lng);
+   595→                        setCaptureLat(c.lat);
+   596→                        setCaptureLng(c.lng);
+   597→                        setCaptureTimestamp(new Date().toISOString());
+   598→                        setGeo({ display: `${c.city}, ${c.state}`, city: c.city, state: c.state });
+   599→                      }}
+   600→                    >
+   601→                      {c.city}
+   602→                    </Button>
+   603→                  ))}
+   604→                </div>
+   605→              </div>
+   606→            </div>
+   607→          )}
+   608→
+   609→          <div className="flex gap-2">
+   610→            <Button variant="outline" className="h-12 flex-1" onClick={() => setStep("photo")}>
+   611→              <ChevronLeft className="mr-1 h-4 w-4" /> Back
+   612→            </Button>
+   613→            <Button className="h-12 flex-[2] text-base" size="lg" disabled={finalLat == null} onClick={() => setStep("details")}>
+   614→              Next: Details
+   615→            </Button>
+   616→          </div>
+   617→        </div>
+   618→      ) : null}
+   619→
+   620→      {/* ---------------- DETAILS ---------------- */}
+   621→      {step === "details" ? (
+   622→        <div className="space-y-5">
+   623→          <div>
+   624→            <h1 className="text-xl font-bold">Anything to add?</h1>
+   625→            <p className="mt-1 text-sm text-muted-foreground">
+   626→              Optional — a short description helps authorities, but the photo does the heavy lifting.
+   627→            </p>
+   628→          </div>
+   629→
+   630→          {hasPhoto ? (
+   631→            <div className="flex items-center gap-3 rounded-xl border p-3">
+   632→              <span className="h-14 w-20 shrink-0 overflow-hidden rounded-lg">
+   633→                {fileUrl ? (
+   634→                  <Photo src={fileUrl} alt="Your photo" width={80} height={56} className="h-full w-full object-cover" />
+   635→                ) : samplePath ? (
+   636→                  <Photo src={samplePath} alt="Sample photo" width={80} height={56} className="h-full w-full object-cover" />
+   637→                ) : null}
+   638→              </span>
+   639→              <div className="min-w-0 text-xs text-muted-foreground">
+   640→                <p className="font-mono">{finalLat?.toFixed(4)}, {finalLng?.toFixed(4)}</p>
+   641→                <p className="mt-0.5 truncate">{geo?.display ?? "Coordinates captured"}</p>
+   642→              </div>
+   643→            </div>
+   644→          ) : null}
+   645→
+   646→          <div className="space-y-2">
+   647→            <Label htmlFor="cl-desc">Description (optional)</Label>
+   648→            <Textarea
+   649→              id="cl-desc"
+   650→              value={description}
+   651→              onChange={(e) => setDescription(e.target.value)}
+   652→              placeholder="e.g. Deep water-filled pothole near the bus stop, two-wheelers swerve to avoid it…"
+   653→              rows={4}
+   654→              maxLength={600}
+   655→            />
+   656→            <p className="text-right text-xs text-muted-foreground">{description.length}/600</p>
+   657→          </div>
+   658→
+   659→          {analyzeError ? (
+   660→            <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+   661→              <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+   662→              <span>{analyzeError}</span>
+   663→            </div>
+   664→          ) : null}
+   665→
+   666→          <div className="flex gap-2">
+   667→            <Button variant="outline" className="h-12 flex-1" onClick={() => setStep("location")}>
+   668→              <ChevronLeft className="mr-1 h-4 w-4" /> Back
+   669→            </Button>
+   670→            <Button className="h-12 flex-[2] text-base" size="lg" disabled={submitting} onClick={() => void runAnalysis()}>
+   671→              {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+   672→              Analyze with AI
+   673→            </Button>
+   674→          </div>
+   675→        </div>
+   676→      ) : null}
+   677→
+   678→      {/* ---------------- ANALYZING ---------------- */}
+   679→      {step === "analyzing" ? (
+   680→        <div className="flex flex-col items-center gap-6 py-10">
+   681→          <div className="relative">
+   682→            <div className="flex h-24 w-24 items-center justify-center rounded-full bg-primary/10">
+   683→              <Sparkles className="h-10 w-10 animate-pulse text-primary" />
+   684→            </div>
+   685→            <span className="absolute inset-0 animate-ping rounded-full border border-primary/30" aria-hidden />
+   686→          </div>
+   687→          <div className="w-full max-w-sm space-y-3">
+   688→            {ANALYSIS_STAGES.map((stage, i) => (
+   689→              <div
+   690→                key={stage}
+   691→                className={cn(
+   692→                  "flex items-center gap-3 text-sm transition-opacity",
+   693→                  i < stageIndex ? "opacity-70" : i === stageIndex ? "opacity-100" : "opacity-30"
+   694→                )}
+   695→              >
+   696→                {i < stageIndex ? (
+   697→                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+   698→                ) : i === stageIndex ? (
+   699→                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+   700→                ) : (
+   701→                  <span className="h-4 w-4 shrink-0 rounded-full border-2 border-dashed" />
+   702→                )}
+   703→                <span className={cn(i === stageIndex && "cl-stage-active font-medium")}>{stage}</span>
+   704→              </div>
+   705→            ))}
+   706→          </div>
+   707→          <p className="max-w-xs text-center text-xs text-muted-foreground">
+   708→            AI is called once per report. Results are stored — refreshing or reopening never re-bills the analysis.
+   709→          </p>
+   710→        </div>
+   711→      ) : null}
+   712→
+   713→      {/* ---------------- REVIEW ---------------- */}
+   714→      {step === "review" && analysis ? (
+   715→        <div className="space-y-5">
+   716→          <div className="flex items-center justify-between gap-2">
+   717→            <div>
+   718→              <div className="flex items-center gap-2">
+   719→                <Badge variant="outline" className="gap-1 border-primary/40 bg-primary/5 text-primary">
+   720→                  <Sparkles className="h-3 w-3" /> AI DETECTED
+   721→                </Badge>
+   722→                {analysis.source === "DEMO_PRECOMPUTED" ? <DemoBadge /> : null}
+   723→              </div>
+   724→              <h1 className="mt-2 flex items-center gap-2 text-2xl font-bold">
+   725→                <CategoryIcon categoryKey={activeCategoryKey} className="h-6 w-6 text-primary" />
+   726→                {activeCategory?.label ?? "Civic issue"}
+   727→              </h1>
+   728→            </div>
+   729→            <SeverityBadge severity={analysis.severity} />
+   730→          </div>
+   731→
+   732→          {analysis.source === "FALLBACK_MANUAL" || !analysis.isCivicIssue ? (
+   733→            <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-800 dark:bg-amber-950">
+   734→              <p className="font-semibold text-amber-800 dark:text-amber-300">
+   735→                {analysis.source === "FALLBACK_MANUAL"
+   736→                  ? "AI analysis temporarily unavailable."
+   737→                  : "AI could not confidently identify a civic issue in this photo."}
+   738→              </p>
+   739→              <p className="mt-1 text-amber-700 dark:text-amber-400">
+   740→                Your report has been saved and can be reviewed manually — please pick a category below, or edit and resubmit.
+   741→              </p>
+   742→            </div>
+   743→          ) : null}
+   744→
+   745→          <Card>
+   746→            <CardContent className="space-y-4 p-5">
+   747→              {/* confidence */}
+   748→              <div>
+   749→                <div className="mb-1 flex items-center justify-between text-sm">
+   750→                  <span className="text-muted-foreground">Confidence</span>
+   751→                  <span className="font-bold">{Math.round(analysis.confidence * 100)}%</span>
+   752→                </div>
+   753→                <Progress value={analysis.confidence * 100} className="h-2" />
+   754→              </div>
+   755→
+   756→              {analysis.hazards.length > 0 ? (
+   757→                <div>
+   758→                  <p className="mb-2 text-sm font-medium">Potential hazards</p>
+   759→                  <div className="flex flex-wrap gap-1.5">
+   760→                    {analysis.hazards.map((h) => (
+   761→                      <HazardChip key={h} hazard={h} />
+   762→                    ))}
+   763→                  </div>
+   764→                </div>
+   765→              ) : null}
+   766→
+   767→              <div className="grid gap-3 text-sm sm:grid-cols-2">
+   768→                <div className="rounded-lg bg-muted/60 p-3">
+   769→                  <p className="text-xs text-muted-foreground">Recommended department</p>
+   770→                  <p className="mt-0.5 font-semibold">{activeDepartment?.name ?? "General Municipal"}</p>
+   771→                </div>
+   772→                <div className="rounded-lg bg-muted/60 p-3">
+   773→                  <p className="text-xs text-muted-foreground">Recommended action</p>
+   774→                  <p className="mt-0.5 font-semibold">{analysis.recommendedAction}</p>
+   775→                </div>
+   776→              </div>
+   777→
+   778→              <p className="text-sm leading-relaxed">
+   779→                <span className="font-medium">AI description: </span>
+   780→                {analysis.description}
+   781→              </p>
+   782→
+   783→              {analysis.reasoning ? (
+   784→                <Collapsible>
+   785→                  <CollapsibleTrigger className="flex items-center gap-1 text-xs font-medium text-primary">
+   786→                    <ChevronDown className="h-3.5 w-3.5" /> Why this classification?
+   787→                  </CollapsibleTrigger>
+   788→                  <CollapsibleContent className="mt-2 rounded-lg bg-muted/60 p-3 text-xs leading-relaxed text-muted-foreground">
+   789→                    {analysis.reasoning}
+   790→                    <span className="mt-2 block opacity-70">
+   791→                      Model: {analysis.model} · source: {analysis.source} · {analysis.processingMs} ms
+   792→                    </span>
+   793→                  </CollapsibleContent>
+   794→                </Collapsible>
+   795→              ) : null}
+   796→            </CardContent>
+   797→          </Card>
+   798→
+   799→          {/* edit panel */}
+   800→          {editing ? (
+   801→            <Card className="border-primary/40">
+   802→              <CardContent className="space-y-3 p-4">
+   803→                <div className="flex items-center justify-between">
+   804→                  <p className="flex items-center gap-1.5 text-sm font-semibold">
+   805→                    <Pencil className="h-4 w-4 text-primary" /> Edit classification
+   806→                  </p>
+   807→                </div>
+   808→                <div>
+   809→                  <Label className="mb-1.5 block text-xs">Issue category</Label>
+   810→                  <Select value={activeCategoryKey} onValueChange={setCategoryOverride}>
+   811→                    <SelectTrigger className="h-10">
+   812→                      <SelectValue placeholder="Choose category" />
+   813→                    </SelectTrigger>
+   814→                    <SelectContent>
+   815→                      {categories.map((c) => (
+   816→                        <SelectItem key={c.key} value={c.key}>
+   817→                          {c.label}
+   818→                        </SelectItem>
+   819→                      ))}
+   820→                    </SelectContent>
+   821→                  </Select>
+   822→                </div>
+   823→                <div>
+   824→                  <Label className="mb-1.5 block text-xs" htmlFor="cl-desc-edit">
+   825→                    Description
+   826→                  </Label>
+   827→                  <Textarea
+   828→                    id="cl-desc-edit"
+   829→                    value={description}
+   830→                    onChange={(e) => setDescription(e.target.value)}
+   831→                    rows={3}
+   832→                    maxLength={600}
+   833→                    placeholder="Optional details for authorities…"
+   834→                  />
+   835→                </div>
+   836→              </CardContent>
+   837→            </Card>
+   838→          ) : (
+   839→            <Button variant="ghost" size="sm" className="text-primary" onClick={() => setEditing(true)}>
+   840→              <Pencil className="mr-1 h-3.5 w-3.5" /> Edit category / description
+   841→            </Button>
+   842→          )}
+   843→
+   844→          <div className="flex gap-2">
+   845→            <Button
+   846→              variant="outline"
+   847→              className="h-12 flex-1"
+   848→              onClick={() => setStep("details")}
+   849→              disabled={submitting}
+   850→            >
+   851→              <ChevronLeft className="mr-1 h-4 w-4" /> Back
+   852→            </Button>
+   853→            <Button className="h-12 flex-[2] text-base" size="lg" disabled={submitting} onClick={() => void doSubmit()}>
+   854→              {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+   855→              Submit Report
+   856→            </Button>
+   857→          </div>
+   858→          <p className="text-center text-xs text-muted-foreground">
+   859→            Next: we check for nearby existing incidents before creating a new one.
+   860→          </p>
+   861→        </div>
+   862→      ) : null}
+   863→
+   864→      {/* ---------------- DUPLICATE DECISION ---------------- */}
+   865→      {step === "duplicate" ? (
+   866→        <div className="space-y-5">
+   867→          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
+   868→            <p className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
+   869→              <MapPinned className="h-4 w-4" /> POSSIBLE EXISTING INCIDENT
+   870→            </p>
+   871→            <p className="mt-1 text-sm text-amber-700 dark:text-amber-400">
+   872→              Nearby citizens have already reported what looks like the same problem. Link your report to
+   873→              strengthen the existing incident, or create a separate one if this is a different spot.
+   874→            </p>
+   875→          </div>
+   876→
+   877→          <div className="space-y-3">
+   878→            {candidates.map((c) => (
+   879→              <Card key={c.publicId} className="overflow-hidden">
+   880→                <CardContent className="p-4">
+   881→                  <div className="flex flex-wrap items-center gap-2">
+   882→                    <span className="font-mono text-sm font-bold">{c.publicId}</span>
+   883→                    <Badge variant="outline">{c.categoryLabel ?? c.categoryKey}</Badge>
+   884→                    <PriorityBadge priority={c.priority} />
+   885→                    <Badge variant="secondary">{c.status.replace("_", " ")}</Badge>
+   886→                  </div>
+   887→                  <div className="mt-2 grid gap-x-4 gap-y-1 text-sm text-muted-foreground sm:grid-cols-2">
+   888→                    <p>
+   889→                      <MapPin className="mr-1 inline h-3.5 w-3.5" />
+   890→                      {formatDistance(c.distanceMeters)} away · {c.city ?? "your area"}
+   891→                    </p>
+   892→                    <p>{c.reportCount} citizen report{c.reportCount > 1 ? "s" : ""}</p>
+   893→                    <p className="sm:col-span-2">{c.address ?? "Location unavailable"}</p>
+   894→                  </div>
+   895→                  <div className="mt-3 flex flex-wrap gap-2">
+   896→                    <Button size="sm" disabled={submitting} onClick={() => void doSubmit("link", c.publicId)}>
+   897→                      <Plus className="mr-1 h-3.5 w-3.5" /> Link my report
+   898→                    </Button>
+   899→                    <Button size="sm" variant="outline" onClick={() => setView({ name: "incident", publicId: c.publicId })}>
+   900→                      View incident
+   901→                    </Button>
+   902→                  </div>
+   903→                </CardContent>
+   904→              </Card>
+   905→            ))}
+   906→          </div>
+   907→
+   908→          <Button variant="outline" className="h-11 w-full" disabled={submitting} onClick={() => void doSubmit("new")}>
+   909→            {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+   910→            This is a different problem — create a new incident
+   911→          </Button>
+   912→        </div>
+   913→      ) : null}
+   914→
+   915→      {/* ---------------- SUCCESS ---------------- */}
+   916→      {step === "success" && result ? (
+   917→        <div className="space-y-6 py-4">
+   918→          <div className="flex flex-col items-center gap-2 text-center">
+   919→            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950">
+   920→              <CheckCircle2 className="h-9 w-9 text-emerald-600" />
+   921→            </span>
+   922→            <h1 className="text-2xl font-bold">Report submitted</h1>
+   923→            <p className="max-w-sm text-sm text-muted-foreground">
+   924→              {result.linked
+   925→                ? "Your report was linked to an existing incident — you are now one of its citizen confirmations."
+   926→                : "A new incident was created, prioritized and routed to the responsible department."}
+   927→            </p>
+   928→          </div>
+   929→
+   930→          <Card className="border-2">
+   931→            <CardContent className="space-y-4 p-5">
+   932→              <div className="flex flex-wrap items-center justify-between gap-2">
+   933→                <span className="font-mono text-lg font-bold">{result.incident.publicId}</span>
+   934→                <div className="flex items-center gap-2">
+   935→                  {result.incident.isDemo ? <DemoBadge /> : null}
+   936→                  <PriorityBadge priority={result.incident.priority} />
+   937→                </div>
+   938→              </div>
+   939→              <p className="font-semibold">{result.incident.title ?? result.incident.categoryLabel}</p>
+   940→              <div className="grid gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
+   941→                <p>
+   942→                  <span className="text-muted-foreground">Issue: </span>
+   943→                  {result.incident.categoryLabel ?? result.incident.categoryKey}
+   944→                </p>
+   945→                <p>
+   946→                  <span className="text-muted-foreground">Location: </span>
+   947→                  {locationLine(result.incident)}
+   948→                </p>
+   949→                <p>
+   950→                  <span className="text-muted-foreground">Department: </span>
+   951→                  {result.incident.departmentName ?? "General Municipal"}
+   952→                </p>
+   953→                <p>
+   954→                  <span className="text-muted-foreground">Citizen reports: </span>
+   955→                  {result.incident.reportCount}
+   956→                </p>
+   957→                <p>
+   958→                  <span className="text-muted-foreground">Status: </span>
+   959→                  {result.incident.status.replace("_", " ")}
+   960→                </p>
+   961→                <p>
+   962→                  <span className="text-muted-foreground">Priority score: </span>
+   963→                  {result.incident.priorityScore}/100
+   964→                </p>
+   965→              </div>
+   966→              <div className="rounded-lg bg-muted/60 p-3">
+   967→                <p className="mb-1 text-xs font-semibold">Why this priority (AI-assisted assessment)</p>
+   968→                <ul className="space-y-1 text-xs text-muted-foreground">
+   969→                  {result.incident.priorityReasons.map((r, i) => (
+   970→                    <li key={i} className="flex items-start gap-1.5">
+   971→                      <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-600" /> {r}
+   972→                    </li>
+   973→                  ))}
+   974→                </ul>
+   975→              </div>
+   976→            </CardContent>
+   977→          </Card>
+   978→
+   979→          <div className="grid gap-2 sm:grid-cols-3">
+   980→            <Button className="h-11" onClick={() => setView({ name: "incident", publicId: result.incident.publicId })}>
+   981→              Track Report
+   982→            </Button>
+   983→            <Button variant="outline" className="h-11" onClick={() => setView({ name: "explore", focus: result.incident.publicId })}>
+   984→              <MapPinned className="mr-1 h-4 w-4" /> View on Map
+   985→            </Button>
+   986→            <Button variant="outline" className="h-11" onClick={resetWizard}>
+   987→              <Camera className="mr-1 h-4 w-4" /> Report Another
+   988→            </Button>
+   989→          </div>
+   990→        </div>
+   991→      ) : null}
+   992→    </div>
+   993→  );
+   994→}
+   995→
