@@ -1,19 +1,14 @@
-// CivicLens — Prisma Schema (PRODUCTION: Supabase PostgreSQL)
-// REPORT = individual citizen submission. INCIDENT = the physical problem.
-// One INCIDENT links many REPORTs (incident clustering / duplicate detection).
-//
-// • url        → runtime client (use the Supabase TRANSACTION pooler :6543 with ?pgbouncer=true)
-// • directUrl  → Prisma CLI: db push / migrations (use SESSION pooler :5432 or direct connection)
-// Offline/local SQLite development uses prisma/schema.sqlite.prisma instead (bun run db:push:local).
+// CivicLens — Prisma Schema (LOCAL/OFFLINE: SQLite)
+// Identical models to schema.prisma (Supabase PostgreSQL) — this copy exists so the app
+// runs with zero external services during offline development / demos.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_DATABASE_URL")
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
 model User {

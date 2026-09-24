@@ -186,3 +186,25 @@ Work Log:
 Stage Summary:
 - Auth is now: NextAuth v4 credentials + bcrypt(12) + httpOnly JWT cookies + CSRF + rate limiting. Citizens self-register (email+password); admin provisioned only via seed (env-configurable, default admin@civiclens.in / CivicLens@Admin2025); demo citizen aarav@civiclens.in / Aarav@12345.
 - Zero changes needed in the 15+ protected API routes (interface preserved). Local setup unchanged except .env needs NEXTAUTH_SECRET (auto-generated in sandbox; instructions in .env.example).
+
+---
+Task ID: 21 (Supabase production migration)
+Agent: main (Z.ai Code)
+Task: Move CivicLens fully to live production — real Supabase PostgreSQL database + Supabase Storage for everything; prepare Vercel deployment.
+
+Work Log:
+- prisma/schema.prisma → provider "postgresql" with url (DATABASE_URL) + directUrl (DIRECT_DATABASE_URL) for pooler-safe db push/migrations. Models unchanged (12).
+- Created prisma/schema.sqlite.prisma (identical models, sqlite provider) for offline/sandbox dev.
+- storage-service.ts → provider-swappable: NEW Supabase Storage adapter (REST upload with service_role key to SUPABASE_STORAGE_BUCKET, organized as reports|evidence/yyyy-mm-dd/uuid.ext, returns public https URL; clear error on failure) + local-disk fallback (public/uploads) when SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY unset. evidence route now passes "evidence" prefix.
+- next.config.ts → images.remotePatterns for **.supabase.co/storage/v1/object/public/**.
+- db.ts → production log level 'error' only (was 'query').
+- package.json: db:push/db:generate (postgres schema), db:push:local/db:generate:local (sqlite schema), vercel-build = "prisma generate && next build" (auto-runs on Vercel).
+- .env.example rewritten: two-mode guide (production Supabase vs offline SQLite) with exact pooler URLs, service-role key, bucket, URL-encoding note.
+- README: new "Go live — Supabase + Vercel" 5-step guide (create project+bucket → .env → db:push+seed → local run on Supabase → Vercel deploy w/ env vars), pooler explanation, offline mode section, updated tech stack/env/deployment sections.
+- Sandbox kept on SQLite: db:push:local regenerated sqlite client; dev server restarted; browser-verified FULL golden path after migration: sign-in → report wizard → real file upload (public/samples/garbage.png) → storage service stored it (/uploads/99b3a60e...) → AI analysis (Garbage/Waste) → submit → INC-1028 created → verified in DB → test data cleaned, pristine 27/51 demo state restored.
+- bun run lint clean; dev.log api_errors = 0; no browser console errors.
+
+Stage Summary:
+- App is now 100% Supabase-ready: set DATABASE_URL (txn pooler 6543 + pgbouncer), DIRECT_DATABASE_URL (session 5432), SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (+ NEXTAUTH_*, ADMIN_*, GEMINI_API_KEY) → bun run db:push && bun run seed:base → bun run dev = live Supabase DB + Storage. Vercel deploy = push repo + same env vars (vercel-build auto-generates Prisma client).
+- Storage adapter auto-switches: Supabase when configured, local disk otherwise — callers unchanged.
+- Sandbox preview unchanged (SQLite twin schema). User needs to create their own free Supabase project + Vercel account (cannot be done on their behalf); exact 10-min checklist in README "Go live" + delivered in chat.

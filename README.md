@@ -46,11 +46,11 @@ If 10 citizens report the same pothole, CivicLens creates **one incident** linke
 | State | **Zustand** | Lightweight client state |
 | Maps | **Leaflet + OpenStreetMap** | Free, no API key, custom clustering |
 | Charts | **Recharts** | Lightweight analytics |
-| Database | **Prisma ORM + SQLite (dev)** | Zero-infra; swap `provider` to `postgresql` for Supabase in production |
+| Database | **Prisma ORM + Supabase PostgreSQL** (production) / SQLite (offline dev) | Real Postgres in the cloud; zero-infra local dev |
+| File storage | **Supabase Storage** (public bucket) | Photos live with your database; local-disk fallback in dev |
 | AI | **Multimodal vision LLM** (z-ai SDK default, **Google Gemini adapter included** — activate with `GEMINI_API_KEY`) | Provider-swappable `AIService` |
 | Auth | **NextAuth.js v4** (credentials, bcrypt, httpOnly JWT) | Proper email+password accounts; free & self-hosted |
 | Geocoding | **OSM Nominatim** (server-side, cached) | Free, graceful fallback to coordinates |
-
 No FastAPI, no MongoDB, no Firebase, no microservices — a deliberately simple, free-first architecture.
 
 ## Architecture
@@ -122,17 +122,74 @@ A **REPORT** is one citizen submission. An **INCIDENT** is the physical problem.
 - Sign-up validates email format and password strength (min 8 chars, 1 letter + 1 number) with Zod.
 - Everything is self-hosted — **no paid auth service, no external dependency, works offline on localhost.**
 
-## Quick start
+## Go live — Supabase + Vercel (production, free tier)
+
+Everything (data **and** photos) lives in your Supabase project. ~10 minutes.
+
+### Step 1 — Create the Supabase project (free)
+1. Sign up at <https://supabase.com> → **New project** (pick the **Mumbai** region for India latency) — save the database password.
+2. **Storage → New bucket** → name `civiclens-uploads` → toggle **Public bucket** ✅.
+3. **Project Settings → API** → copy the **Project URL** and the **service_role** key.
+4. **Project Settings → Database → Connection string → URI** → copy both pooler URLs (transaction `:6543` and session `:5432`).
+
+### Step 2 — Configure `.env` locally
+```bash
+cp .env.example .env
+```
+Fill in (URL-encode special characters in the password — `%40` for `@` …):
+```bash
+DATABASE_URL=postgresql://postgres.REF:PASSWORD@aws-0-REGION.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1
+DIRECT_DATABASE_URL=postgresql://postgres.REF:PASSWORD@aws-0-REGION.pooler.supabase.com:5432/postgres
+SUPABASE_URL=https://YOUR_REF.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJ...        # server-side only — never exposed to the browser
+SUPABASE_STORAGE_BUCKET=civiclens-uploads
+NEXTAUTH_SECRET=<openssl rand -base64 32>
+NEXTAUTH_URL=http://localhost:3000      # your final URL later
+ADMIN_PASSWORD=<your strong admin password>
+GEMINI_API_KEY=<free key from aistudio.google.com/apikey>
+```
+
+### Step 3 — Create tables + seed
+```bash
+bun run db:push        # creates all 11 tables in Supabase Postgres (uses DIRECT_DATABASE_URL)
+bun run seed:base      # categories + departments + authority account (no demo data)
+# or the full SIH demo dataset:  bun run seed
+```
+
+### Step 4 — Run locally against Supabase
+```bash
+bun run dev            # http://localhost:3000 — already 100% on your live Supabase DB
+```
+Photos now upload to `https://YOUR_REF.supabase.co/storage/v1/object/public/civiclens-uploads/...`.
+
+### Step 5 — Deploy to Vercel (free)
+1. Push the project to GitHub.
+2. <https://vercel.com> → **Add New → Project** → import the repo (framework auto-detected).
+3. **Environment Variables** — add the same values as your `.env` (`DATABASE_URL`, `DIRECT_DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET`, `NEXTAUTH_SECRET`, `ADMIN_*`, `GEMINI_API_KEY`) and set **`NEXTAUTH_URL=https://your-app.vercel.app`** (your deployment URL).
+4. **Deploy** — Vercel automatically runs the `vercel-build` script (`prisma generate && next build`).
+5. Open your live URL — sign up as a citizen, or sign in as Authority with your `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
+
+> **Why two database URLs?** Serverless functions (Vercel) need PgBouncer-compatible pooling — `DATABASE_URL` (transaction pooler, `?pgbouncer=true`) is used by the running app. Schema tools (`db push`, migrations) use `DIRECT_DATABASE_URL` (session pooler). Same project, two doors.
+
+### Offline / demo mode (no internet needed)
+
+```bash
+# .env:  DATABASE_URL=file:../db/custom.db   (leave Supabase vars empty)
+bun run db:push:local && bun run seed && bun run dev
+```
+Uses `prisma/schema.sqlite.prisma` and stores photos in `public/uploads` — identical app behavior, zero external services.
+
+## Quick start (offline SQLite)
 
 ```bash
 # 1. Install dependencies
 bun install            # or npm install
 
 # 2. Configure environment
-cp .env.example .env   # defaults work out of the box for local dev
+cp .env.example .env   # offline defaults work out of the box
 
-# 3. Create the database schema
-bun run db:push
+# 3. Create the local database schema
+bun run db:push:local
 
 # 4. Seed categories, departments, demo users and demo incidents
 bun run seed           # add --hard-reset for a full wipe & reseed
@@ -141,14 +198,11 @@ bun run seed           # add --hard-reset for a full wipe & reseed
 bun run dev            # http://localhost:3000
 ```
 
-### Run on your local machine — 100% REAL data (no demo incidents)
+### Run on your local machine — 100% REAL data (Supabase)
 
-1. Install **Bun** (recommended — it runs the TypeScript seed with path aliases out of the box): <https://bun.sh> · or `npm install -g bun`
-2. `bun install`
-3. `cp .env.example .env` — then **add your free Gemini key** for real AI photo analysis (get one at <https://aistudio.google.com/apikey>): `GEMINI_API_KEY=AIza...`
-4. `bun run db:push` → `bun run seed:base` *(seeds 10 categories + 8 departments + the authority account — no demo incidents)*
-5. `bun run dev:local` (Windows-friendly; use `bun run dev` on macOS/Linux/WSL)
-6. Open <http://localhost:3000> — **Create Account** as a citizen (any name/email/password), or sign in as Authority with the seeded admin account.
+Follow the **Go live** guide above (Steps 1–4): your local dev server then runs entirely on your real Supabase database and storage. Only want categories + departments (no demo incidents)? Use `bun run seed:base`.
+
+Offline alternative (no Supabase): `bun run db:push:local` → `bun run seed:base` → `bun run dev:local`.
 
 Everything you report now is real: your photos, real GPS, real Gemini analysis, real incidents on the map. To wipe real data later: `bun run seed --hard-reset`. To add the SIH demo dataset back: `bun run seed`.
 
@@ -160,7 +214,10 @@ Everything you report now is real: your photos, real GPS, real Gemini analysis, 
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `DATABASE_URL` | yes | SQLite path (dev) or PostgreSQL URL (production) |
+| `DATABASE_URL` | yes | Supabase **transaction pooler** (`:6543` + `?pgbouncer=true`) in production; `file:../db/custom.db` for offline dev |
+| `DIRECT_DATABASE_URL` | production | Supabase **session pooler** (`:5432`) — used by `db push` / migrations |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | production | Supabase Storage uploads (server-side only) |
+| `SUPABASE_STORAGE_BUCKET` | no | Uploads bucket (default `civiclens-uploads`) |
 | `NEXTAUTH_SECRET` | yes | Session signing secret — generate: `openssl rand -base64 32` |
 | `NEXTAUTH_URL` | no | App URL (defaults to `http://localhost:3000` in dev) |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | no | Authority account provisioned by the seed (defaults: `admin@civiclens.in` / `CivicLens@Admin2025` / `Neha Kulkarni`) |
@@ -192,13 +249,13 @@ Everything you report now is real: your photos, real GPS, real Gemini analysis, 
 
 ## Deployment
 
-**Vercel + Supabase (free-tier friendly):**
-1. Create a Supabase project → copy the PostgreSQL connection string.
-2. In `prisma/schema.prisma` change `provider = "sqlite"` → `"postgresql"`, set `DATABASE_URL`, run `bun run db:push` and `bun run seed`.
-3. Replace the local `ImageStorage` adapter (`src/lib/services/storage-service.ts`) with a Supabase Storage/S3 adapter (the interface is already isolated: `validateImage` + `storeImage`).
-4. Push to GitHub → import into Vercel → set env vars → deploy.
+**Already configured for Vercel + Supabase** — see the *Go live* section for the full walkthrough. Summary of what is production-wired:
 
-> Note: the current local adapter writes uploads to `public/uploads`, which suits self-hosted/VPS deployments; serverless filesystems need the storage adapter swap above.
+- `prisma/schema.prisma` → **postgresql** with `directUrl` (pooler-safe migrations); SQLite twin at `prisma/schema.sqlite.prisma` for offline dev.
+- `src/lib/services/storage-service.ts` → **Supabase Storage adapter** (activates automatically when `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` are set); local-disk fallback otherwise.
+- `vercel-build` script → `prisma generate && next build` (runs automatically on Vercel).
+- `next.config.ts` → allows Supabase Storage image URLs.
+- Self-hosting instead of Vercel? `bun run build && bun start` (standalone output) works on any VPS.
 
 ## Limitations (honest scope statement)
 

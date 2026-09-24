@@ -34,7 +34,7 @@ export async function POST(
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const stored = await storeImage(buffer, file.type);
+    const stored = await storeImage(buffer, file.type, "evidence");
 
     const evidence = await db.resolutionEvidence.create({
       data: {
