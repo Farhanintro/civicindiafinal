@@ -141,3 +141,22 @@ Work Log:
 
 Stage Summary:
 - CivicLens is complete and demo-ready. Start with: bun install && bun run db:push && bun run seed && bun run dev → http://localhost:3000
+
+---
+Task ID: 19 (local-machine setup enablement)
+Agent: main (Z.ai Code)
+Task: Make CivicLens runnable on the user's local machine with 100% real data; document setup + tech stack.
+
+Work Log:
+- Verified Prisma SQLite relative-path resolution with probe DBs (CLI + runtime both resolve `file:../db/x.db` → project-root `db/`); probes deleted.
+- Created missing `.env.example` (portable `DATABASE_URL=file:../db/custom.db`, `GEMINI_API_KEY`, `GEMINI_MODEL`, duplicate-detection tuning) — README previously referenced it but it did not exist.
+- Added `--base-only` seed mode (`seedDemoData({ baseOnly })` + `scripts/seed.ts` flag + `bun run seed:base` script): seeds ONLY 10 categories + 8 departments, no demo incidents/users — enables running purely on real data.
+- Added Windows-friendly `dev:local` script (`next dev -p 3000`, no `tee` pipe).
+- README: added "Run on your local machine — 100% REAL data" section (bun install → .env with Gemini key → db:push → seed:base → dev:local; Windows notes; AI fallback explanation).
+- Tested `--base-only` end-to-end on a scratch DATABASE_URL (10 categories, 8 departments, 0 incidents/users/reports confirmed); scratch DB deleted; sandbox demo data untouched (27 incidents / 51 reports).
+- `bun run lint` → clean. Dev server healthy (all routes 200). Browser smoke test: landing renders, citizen login auto-creates user, dashboard renders, zero console errors; test user removed afterwards.
+
+Stage Summary:
+- AI provider chain confirmed: GEMINI_API_KEY → Google Gemini; else sandbox vision SDK; else precomputed (samples); else heuristic fallback (report never lost). Locally, users should set GEMINI_API_KEY (free, aistudio.google.com/apikey) for real AI.
+- Local quick start: `bun install` → `cp .env.example .env` (add Gemini key) → `bun run db:push` → `bun run seed:base` → `bun run dev:local` → login with any name.
+- Demo mode unchanged: `bun run seed` (SIH dataset), `bun run seed --hard-reset` (full wipe).

@@ -375,8 +375,17 @@ export async function deleteAllData() {
   await db.user.deleteMany({});
 }
 
-export async function seedDemoData(opts?: { reset?: boolean; hardReset?: boolean }) {
+export async function seedDemoData(opts?: {
+  reset?: boolean;
+  hardReset?: boolean;
+  /** Seed ONLY categories + departments (no demo users/incidents) — for running purely on real data. */
+  baseOnly?: boolean;
+}) {
   await ensureBaseData();
+
+  if (opts?.baseOnly) {
+    return { seeded: true, baseOnly: true, incidents: 0, reports: 0 };
+  }
 
   if (opts?.hardReset) {
     await deleteAllData();

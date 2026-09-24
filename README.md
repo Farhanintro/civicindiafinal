@@ -131,6 +131,21 @@ bun run seed           # add --hard-reset for a full wipe & reseed
 bun run dev            # http://localhost:3000
 ```
 
+### Run on your local machine — 100% REAL data (no demo incidents)
+
+1. Install **Bun** (recommended — it runs the TypeScript seed with path aliases out of the box): <https://bun.sh> · or `npm install -g bun`
+2. `bun install`
+3. `cp .env.example .env` — then **add your free Gemini key** for real AI photo analysis (get one at <https://aistudio.google.com/apikey>): `GEMINI_API_KEY=AIza...`
+4. `bun run db:push` → `bun run seed:base` *(seeds only the 10 categories + 8 departments — no demo incidents, no demo users)*
+5. `bun run dev:local` (Windows-friendly; use `bun run dev` on macOS/Linux/WSL)
+6. Open <http://localhost:3000>, log in with **any name** as Citizen or Authority — users are created on first login.
+
+Everything you report now is real: your photos, real GPS, real Gemini analysis, real incidents on the map. To wipe real data later: `bun run seed --hard-reset`. To add the SIH demo dataset back: `bun run seed`.
+
+> **Note on AI:** without `GEMINI_API_KEY`, photo analysis falls back to a keyword heuristic labelled *"AI analysis temporarily unavailable — saved for manual review"* — the report is never lost. The 9 bundled sample photos always use precomputed results (zero quota). Every analysis is called **once** and cached in `ai_analyses` forever.
+
+> **Windows:** use `bun run dev:local` (the default `dev` script pipes logs through `tee`, which needs macOS/Linux/WSL/Git Bash). `bun`, `prisma` and all other scripts are fully cross-platform.
+
 ### Environment variables
 
 | Variable | Required | Purpose |
