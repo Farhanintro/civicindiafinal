@@ -156,6 +156,11 @@ bun run seed:base      # categories + departments + authority account (no demo d
 # or the full SIH demo dataset:  bun run seed
 ```
 
+> **Moving an existing SQLite install to Supabase?** After `db:push`, run
+> `bun run migrate:supabase` — copies every row (users, incidents, reports,
+> AI analyses, notifications…) from `db/custom.db` into Supabase, preserving
+> IDs, password hashes and timestamps. Idempotent; source file untouched.
+
 ### Step 4 — Run locally against Supabase
 ```bash
 bun run dev            # http://localhost:3000 — already 100% on your live Supabase DB
@@ -215,6 +220,7 @@ Everything you report now is real: your photos, real GPS, real Gemini analysis, 
 | Variable | Required | Purpose |
 |---|---|---|
 | `DATABASE_URL` | yes | Supabase **transaction pooler** (`:6543` + `?pgbouncer=true`) in production; `file:../db/custom.db` for offline dev |
+| `POSTGRES_URL` | no | Same value as `DATABASE_URL` — takes precedence at runtime; set it if your host pre-injects a `DATABASE_URL` you can't change |
 | `DIRECT_DATABASE_URL` | production | Supabase **session pooler** (`:5432`) — used by `db push` / migrations |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | production | Supabase Storage uploads (server-side only) |
 | `SUPABASE_STORAGE_BUCKET` | no | Uploads bucket (default `civiclens-uploads`) |

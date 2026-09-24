@@ -208,3 +208,25 @@ Stage Summary:
 - App is now 100% Supabase-ready: set DATABASE_URL (txn pooler 6543 + pgbouncer), DIRECT_DATABASE_URL (session 5432), SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (+ NEXTAUTH_*, ADMIN_*, GEMINI_API_KEY) → bun run db:push && bun run seed:base → bun run dev = live Supabase DB + Storage. Vercel deploy = push repo + same env vars (vercel-build auto-generates Prisma client).
 - Storage adapter auto-switches: Supabase when configured, local disk otherwise — callers unchanged.
 - Sandbox preview unchanged (SQLite twin schema). User needs to create their own free Supabase project + Vercel account (cannot be done on their behalf); exact 10-min checklist in README "Go live" + delivered in chat.
+
+---
+Task ID: 22 (Supabase go-live — real project wired + full data migration)
+Agent: main (Z.ai Code)
+Task: Connect the user's real Supabase project (ref focoqiluxstfgasmwdad), create tables, migrate 100% of existing SQLite data, and run the live app entirely on Supabase (Postgres + Storage).
+
+Work Log:
+- .env: DATABASE_URL (transaction pooler :6543 + ?pgbouncer=true&connection_limit=1), DIRECT_DATABASE_URL, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_STORAGE_BUCKET=civiclens-uploads; sqlite line kept as comment.
+- First db push attempt on direct db.REF.supabase.co:5432 → P1001 (IPv6-only) → switched DIRECT_DATABASE_URL to SESSION POOLER aws-0-ap-southeast-1.pooler.supabase.com:5432 → push OK (11 tables, 3.2s), Prisma client regenerated as postgres.
+- Created public Storage bucket "civiclens-uploads" via REST API (service_role key).
+- Sandbox quirk: parent process injects DATABASE_URL=file:.../custom.db as a real env var which overrides .env → runtime client got file: URL (P1001-style protocol error). Fixed robustly: src/lib/db.ts now resolves datasourceUrl from POSTGRES_URL ?? DATABASE_URL (file: guard), .env sets POSTGRES_URL; same resolution copied into scripts/migrate-to-supabase.ts.
+- Wrote scripts/migrate-to-supabase.ts (bun:sqlite readonly reader + Prisma postgres writer; epoch-ms→Date, 0/1→Boolean; FK-safe order; wipes target first = idempotent; verifies counts). package.json: "migrate:supabase".
+- Ran migration: 283 rows (8 users / 10 categories / 8 departments / 27 incidents / 51 reports / 27 AiAnalysis / 51 IncidentReport / 68 StatusHistory / 12 Assignment / 18 Notification / 3 ResolutionEvidence) — all counts verified sqlite=supabase.
+- Dev server restarted; dev.log shows "public"."Table" + $n binds = live Postgres; 0 errors; lint clean.
+- Browser E2E on Supabase: home ✓, explore (27 INC on map/list) ✓, citizen sign-in aarav (bcrypt hash migrated intact) + dashboard INC-1001…1004 ✓, admin sign-in Neha Kulkarni → Command Center queue/stats ✓, full golden path: upload garbage.png → Supabase Storage public URL → AI (illegal_dumping 0.98, VLM_SDK) → submit → INC-1028/REP-0052 rows in Supabase ✓.
+- Test data cleaned (rows + storage object; FK-safe order incl. StatusHistory), pristine 27/51/8/27 restored; bucket empty.
+- Docs: .env.example (POSTGRES_URL option + IPv6 session-pooler note), README (migrate:supabase tip + POSTGRES_URL env row).
+
+Stage Summary:
+- App now runs 100% LIVE on the user's Supabase: Postgres (pooler-safe) + Storage bucket civiclens-uploads + all 283 migrated rows with hashes/timestamps intact. Offline SQLite mode still available (db:push:local + DATABASE_URL=file:…).
+- Direct db.*.supabase.co is IPv6-only — session pooler :5432 is the working directUrl everywhere.
+- Next step for full public launch: deploy to Vercel (README Step 5), set NEXTAUTH_URL to the real domain + rotate DB password/service key if credentials were shared in chat.
