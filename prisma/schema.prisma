@@ -16,6 +16,7 @@ model User {
   publicId      String         @unique
   name          String
   email         String?        @unique
+  passwordHash  String?        // bcrypt hash (cost 12) — null for legacy/demo users without a password
   role          String         @default("CITIZEN") // CITIZEN | ADMIN
   city          String?
   isDemo        Boolean        @default(false)

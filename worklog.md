@@ -160,3 +160,29 @@ Stage Summary:
 - AI provider chain confirmed: GEMINI_API_KEY → Google Gemini; else sandbox vision SDK; else precomputed (samples); else heuristic fallback (report never lost). Locally, users should set GEMINI_API_KEY (free, aistudio.google.com/apikey) for real AI.
 - Local quick start: `bun install` → `cp .env.example .env` (add Gemini key) → `bun run db:push` → `bun run seed:base` → `bun run dev:local` → login with any name.
 - Demo mode unchanged: `bun run seed` (SIH dataset), `bun run seed --hard-reset` (full wipe).
+
+---
+Task ID: 20 (production authentication)
+Agent: main (Z.ai Code)
+Task: Replace demo name-based login with proper sign-up/sign-in for citizens + provisioned default admin account. Must be free forever and highly secure (not a demo).
+
+Work Log:
+- Installed bcryptjs v3 (pure JS, bundled types). Added `passwordHash String?` to User model + db:push (non-destructive).
+- Created src/lib/rate-limit.ts (in-memory sliding window: login 10/15min per IP AND per email; register 5/15min per IP; sweep on size).
+- Rewrote src/lib/auth.ts on NextAuth.js v4 (already in deps): CredentialsProvider + bcrypt compare, JWT strategy (30d), jwt/session callbacks carrying id/publicId/role/city, module augmentation for typed extra fields. KEPT the exact `getSessionUser`/`requireRole` interface so all existing API routes work unchanged. Added hashPassword/normalizeEmail exports.
+- Added src/app/api/auth/[...nextauth]/route.ts (NextAuth catch-all: session/csrf/signin/signout/callback).
+- Added src/app/api/auth/register/route.ts: zod validation (name 2-60, email, password ≥8 w/ letter+number, ≤72), rate-limited, 409 on duplicate email, creates CITIZEN only (admin can NEVER be self-registered).
+- Deleted old /api/auth/login and /api/auth/logout routes.
+- seed-service.ts: DEFAULT_ADMIN (env: ADMIN_NAME/ADMIN_EMAIL/ADMIN_PASSWORD, defaults Neha Kulkarni/admin@civiclens.in/CivicLens@Admin2025, `||` fallbacks so empty .env values can't blank the password) + ensureAdminUser() (creates admin, claims seeded Neha by name, refreshes hash on reseed) — runs in BOTH full seed and --base-only; demo citizen Aarav Sharma gets credentials aarav@civiclens.in/Aarav@12345 with report history preserved.
+- store/civiclens.ts: signin/signup/logout now use next-auth/react signIn("credentials", redirect:false)+signOut; signup auto-signs-in after register; intent-based routing preserved (ADMIN→command center, citizen→report/citizen dashboard).
+- auth-dialog.tsx redesigned: Sign In | Create Account tabs, email+password, confirm password, password visibility toggle, inline validation + error alerts, Enter-to-submit, autocomplete attrs, authority hint line.
+- citizen/header.tsx: added account menu (avatar dropdown → My dashboard / Report issue / Sign out) — citizens previously had no sign-out on the dashboard.
+- .env: added generated NEXTAUTH_SECRET + NEXTAUTH_URL. .env.example: full auth section (secret generation command, ADMIN_* vars).
+- README: new "Authentication (production-grade, always free)" section, demo account credentials, updated env table, quick start, security section (bcrypt cost 12, httpOnly JWT, CSRF, rate limits), demo scenario steps, limitations rewritten.
+- Fixed dev-server stale Prisma client issue (restart required after db:push adding a column — 500s on register were PrismaClientValidationError).
+- Verified via curl + agent-browser E2E: register 201/400/409, sign-in 200/401, wrong password shows "Invalid email or password.", admin login → command center, Aarav demo login → dashboard w/ history, sign-out works (site header + citizen header), citizen calling admin API → 403, full golden path analyze→submit→INC created with session. Removed all test users/reports/incidents afterwards (27 incidents/51 reports/8 users restored to pristine demo state).
+- `bun run lint` clean; dev.log zero api_errors after restart.
+
+Stage Summary:
+- Auth is now: NextAuth v4 credentials + bcrypt(12) + httpOnly JWT cookies + CSRF + rate limiting. Citizens self-register (email+password); admin provisioned only via seed (env-configurable, default admin@civiclens.in / CivicLens@Admin2025); demo citizen aarav@civiclens.in / Aarav@12345.
+- Zero changes needed in the 15+ protected API routes (interface preserved). Local setup unchanged except .env needs NEXTAUTH_SECRET (auto-generated in sandbox; instructions in .env.example).

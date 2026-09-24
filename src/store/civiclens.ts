@@ -3,6 +3,7 @@
 // CivicLens — global client state (zustand): session, view routing, config, notifications.
 
 import { create } from "zustand";
+import { signIn, signOut } from "next-auth/react";
 import type {
   CategoryConfig,
   DepartmentConfig,
@@ -40,7 +41,8 @@ interface CivicLensState {
   goBack: () => void;
   openAuth: (intent?: "report" | "dashboard" | "admin") => void;
   closeAuth: () => void;
-  login: (role: "CITIZEN" | "ADMIN", name: string, city?: string) => Promise<void>;
+  signin: (email: string, password: string) => Promise<void>;
+  signup: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshNotifications: () => Promise<void>;
   markNotificationsRead: () => Promise<void>;
@@ -82,27 +84,41 @@ export const useCivicLens = create<CivicLensState>((set, get) => ({
   openAuth: (intent) => set({ authOpen: true, authIntent: intent ?? null }),
   closeAuth: () => set({ authOpen: false, authIntent: null }),
 
-  login: async (role, name, city) => {
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role, name, city }),
+  signin: async (email, password) => {
+    // NextAuth credentials sign-in (CSRF-protected, httpOnly JWT cookie)
+    const res = await signIn("credentials", {
+      email: email.trim().toLowerCase(),
+      password,
+      redirect: false,
     });
-    if (!res.ok) {
-      const err = (await res.json().catch(() => ({}))) as { error?: string };
-      throw new Error(err.error ?? "Login failed");
+    if (!res || res.error) {
+      throw new Error("Invalid email or password.");
     }
-    const data = (await res.json()) as { user: SessionUser };
+    const meRes = await fetch("/api/auth/me");
+    const data = (await meRes.json()) as { user: SessionUser };
     const intent = get().authIntent; // capture BEFORE clearing state
     set({ user: data.user, authOpen: false, authIntent: null });
     await get().refreshNotifications();
-    if (role === "ADMIN") set({ view: { name: "admin", tab: "dashboard" } });
+    if (data.user.role === "ADMIN") set({ view: { name: "admin", tab: "dashboard" } });
     else if (intent === "report") set({ view: { name: "report" } });
     else set({ view: { name: "citizen" } });
   },
 
+  signup: async (name, email, password) => {
+    const res = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, email, password }),
+    });
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(err.error ?? "Sign up failed. Please try again.");
+    }
+    await get().signin(email, password); // auto sign-in after successful sign-up
+  },
+
   logout: async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await signOut({ redirect: false });
     set({ user: null, notifications: [], unreadCount: 0, view: { name: "landing" }, prevView: null });
   },
 

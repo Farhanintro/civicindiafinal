@@ -13,8 +13,9 @@ const result = await seedDemoData({ reset, hardReset, baseOnly });
 log.info("api_ok", { route: "seed", ...result });
 if ("baseOnly" in result && result.baseOnly) {
   console.log(
-    "✓ Base data ready (10 categories + 8 departments). No demo incidents seeded — you are running on REAL data only.\n" +
-      "  Log in with any name (Citizen or Authority) at http://localhost:3000"
+    "✓ Base data ready (10 categories + 8 departments + authority account). No demo incidents seeded.\n" +
+      `  Authority sign-in: ${(result as { admin?: string }).admin ?? "admin@civiclens.in"} (password: ADMIN_PASSWORD env or default — see README)\n` +
+      "  Citizens sign up at http://localhost:3000"
   );
 } else {
   console.log(

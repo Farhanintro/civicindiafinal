@@ -3,6 +3,7 @@
 // set of DEMO incidents (clearly labelled isDemo=true — never presented as real government data).
 // Idempotent: skips when demo incidents already exist, unless { reset: true }.
 
+import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { DEFAULT_CATEGORIES, DEFAULT_DEPARTMENTS } from "@/lib/civiclens/constants";
 import { assessPriority, severityBand } from "./priority-service";
@@ -296,7 +297,8 @@ const INCIDENTS: IncidentSpec[] = [
 
 const DEMO_USERS = [
   { name: "Neha Kulkarni", role: "ADMIN", city: null },
-  { name: "Aarav Sharma", role: "CITIZEN", city: "Alwar" },
+  // Demo citizen with pre-built report history — sign-in credentials (documented in README):
+  { name: "Aarav Sharma", role: "CITIZEN", city: "Alwar", email: "aarav@civiclens.in", password: "Aarav@12345" },
   { name: "Priya Verma", role: "CITIZEN", city: "Jaipur" },
   { name: "Rahul Mehta", role: "CITIZEN", city: "Delhi" },
   { name: "Sneha Patil", role: "CITIZEN", city: "Pune" },
@@ -304,6 +306,54 @@ const DEMO_USERS = [
   { name: "Ananya Rao", role: "CITIZEN", city: "Bengaluru" },
   { name: "Imran Sheikh", role: "CITIZEN", city: "Mumbai" },
 ] as const;
+
+// Default authority account — provisioned by the seed, never self-registered.
+// Override ADMIN_EMAIL / ADMIN_PASSWORD / ADMIN_NAME via .env before seeding.
+// (uses || so an empty value in .env falls back to the default instead of a blank password)
+export const DEFAULT_ADMIN = {
+  email: process.env.ADMIN_EMAIL?.trim().toLowerCase() || "admin@civiclens.in",
+  password: process.env.ADMIN_PASSWORD?.trim() || "CivicLens@Admin2025",
+  name: process.env.ADMIN_NAME?.trim() || "Neha Kulkarni",
+};
+
+/**
+ * Ensure the authority (ADMIN) account exists with email + bcrypt password.
+ * - Creates the admin if missing
+ * - Attaches credentials to the seeded demo admin (Neha Kulkarni) when email is still unset
+ * - Refreshes the password hash so env ADMIN_PASSWORD changes take effect on reseed
+ */
+async function ensureAdminUser() {
+  const { email, password, name } = DEFAULT_ADMIN;
+  const passwordHash = await bcrypt.hash(password, 12);
+
+  const byEmail = await db.user.findUnique({ where: { email } });
+  if (byEmail) {
+    if (byEmail.role !== "ADMIN" || byEmail.passwordHash !== passwordHash) {
+      await db.user.update({
+        where: { id: byEmail.id },
+        data: { role: "ADMIN", passwordHash },
+      });
+    }
+    return byEmail;
+  }
+
+  // Claim the seeded demo admin (name match, email not yet set)
+  const byName = await db.user.findFirst({ where: { name, role: "ADMIN" } });
+  if (byName) {
+    return db.user.update({ where: { id: byName.id }, data: { email, passwordHash } });
+  }
+
+  const count = await db.user.count();
+  return db.user.create({
+    data: {
+      publicId: `USR-${String(count + 1).padStart(3, "0")}`,
+      name,
+      email,
+      passwordHash,
+      role: "ADMIN",
+    },
+  });
+}
 
 async function ensureBaseData() {
   for (const d of DEFAULT_DEPARTMENTS) {
@@ -328,6 +378,9 @@ async function ensureDemoUsers() {
   let counter = await db.user.count();
   for (const u of DEMO_USERS) {
     let user = await db.user.findFirst({ where: { name: u.name, role: u.role } });
+    const demoCreds = "email" in u && "password" in u
+      ? { email: u.email as string, passwordHash: await bcrypt.hash(u.password as string, 12) }
+      : null;
     if (!user) {
       counter += 1;
       user = await db.user.create({
@@ -337,8 +390,12 @@ async function ensureDemoUsers() {
           role: u.role,
           city: u.city,
           isDemo: true,
+          ...(demoCreds ?? {}),
         },
       });
+    } else if (demoCreds && !user.email) {
+      // attach sign-in credentials to the pre-seeded demo user (report history stays linked)
+      user = await db.user.update({ where: { id: user.id }, data: demoCreds });
     }
     map.set(u.name, user.id);
   }
@@ -383,8 +440,11 @@ export async function seedDemoData(opts?: {
 }) {
   await ensureBaseData();
 
+  // The authority account is functional infrastructure (not demo data) — always provisioned.
+  await ensureAdminUser();
+
   if (opts?.baseOnly) {
-    return { seeded: true, baseOnly: true, incidents: 0, reports: 0 };
+    return { seeded: true, baseOnly: true, incidents: 0, reports: 0, admin: DEFAULT_ADMIN.email };
   }
 
   if (opts?.hardReset) {
@@ -398,6 +458,7 @@ export async function seedDemoData(opts?: {
   }
 
   const users = await ensureDemoUsers();
+  await ensureAdminUser(); // attach credentials to the seeded admin (Neha Kulkarni)
   const admin = users.get("Neha Kulkarni")!;
   const categories = await db.category.findMany();
   const catMap = new Map(categories.map((c) => [c.key, c]));

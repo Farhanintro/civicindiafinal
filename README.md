@@ -48,8 +48,8 @@ If 10 citizens report the same pothole, CivicLens creates **one incident** linke
 | Charts | **Recharts** | Lightweight analytics |
 | Database | **Prisma ORM + SQLite (dev)** | Zero-infra; swap `provider` to `postgresql` for Supabase in production |
 | AI | **Multimodal vision LLM** (z-ai SDK default, **Google Gemini adapter included** — activate with `GEMINI_API_KEY`) | Provider-swappable `AIService` |
+| Auth | **NextAuth.js v4** (credentials, bcrypt, httpOnly JWT) | Proper email+password accounts; free & self-hosted |
 | Geocoding | **OSM Nominatim** (server-side, cached) | Free, graceful fallback to coordinates |
-| Auth | Lightweight demo cookie session | Structured for NextAuth/Supabase Auth later |
 
 No FastAPI, no MongoDB, no Firebase, no microservices — a deliberately simple, free-first architecture.
 
@@ -108,9 +108,19 @@ A **REPORT** is one citizen submission. An **INCIDENT** is the physical problem.
 
 27 seeded incidents + 51 reports across **Alwar, Jaipur, Delhi, Mumbai, Bengaluru, Lucknow, Pune** — potholes, garbage, water leaks, streetlights, sewage, open manholes, dumping, obstructions — with different priorities, statuses, clustered reports, resolved incidents with before/after evidence. Every seeded record is visibly badged **DEMO DATA** and is never presented as real government data.
 
-**Demo users** (name-based demo login — see *Limitations*):
-- Citizen: `Aarav Sharma` (has report history + notifications)
-- Authority/Admin: `Neha Kulkarni`
+**Demo accounts** (sign in with email + password):
+- Authority/Admin: `admin@civiclens.in` — password from `ADMIN_PASSWORD` env, default `CivicLens@Admin2025` (**change it before real use**)
+- Demo citizen (pre-built report history): `aarav@civiclens.in` / `Aarav@12345`
+
+### Authentication (production-grade, always free)
+
+- **Citizens** self-register: *Create Account* (name + email + password) → auto signed in. Passwords are hashed with **bcrypt (cost 12)** — plain passwords are never stored.
+- **Authority/Admin** accounts are **provisioned by the seed** (`ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` env vars) and can **never be self-registered**.
+- Sessions are **signed httpOnly JWT cookies** (NextAuth.js v4) with built-in CSRF protection — nothing session-related is readable from JavaScript.
+- **Brute-force protection:** sign-in is rate-limited (10 attempts / 15 min per IP *and* per email); sign-up is rate-limited (5 / 15 min per IP).
+- All admin APIs enforce the ADMIN role (403 for citizens); citizens can only access their own reports.
+- Sign-up validates email format and password strength (min 8 chars, 1 letter + 1 number) with Zod.
+- Everything is self-hosted — **no paid auth service, no external dependency, works offline on localhost.**
 
 ## Quick start
 
@@ -136,9 +146,9 @@ bun run dev            # http://localhost:3000
 1. Install **Bun** (recommended — it runs the TypeScript seed with path aliases out of the box): <https://bun.sh> · or `npm install -g bun`
 2. `bun install`
 3. `cp .env.example .env` — then **add your free Gemini key** for real AI photo analysis (get one at <https://aistudio.google.com/apikey>): `GEMINI_API_KEY=AIza...`
-4. `bun run db:push` → `bun run seed:base` *(seeds only the 10 categories + 8 departments — no demo incidents, no demo users)*
+4. `bun run db:push` → `bun run seed:base` *(seeds 10 categories + 8 departments + the authority account — no demo incidents)*
 5. `bun run dev:local` (Windows-friendly; use `bun run dev` on macOS/Linux/WSL)
-6. Open <http://localhost:3000>, log in with **any name** as Citizen or Authority — users are created on first login.
+6. Open <http://localhost:3000> — **Create Account** as a citizen (any name/email/password), or sign in as Authority with the seeded admin account.
 
 Everything you report now is real: your photos, real GPS, real Gemini analysis, real incidents on the map. To wipe real data later: `bun run seed --hard-reset`. To add the SIH demo dataset back: `bun run seed`.
 
@@ -151,6 +161,9 @@ Everything you report now is real: your photos, real GPS, real Gemini analysis, 
 | Variable | Required | Purpose |
 |---|---|---|
 | `DATABASE_URL` | yes | SQLite path (dev) or PostgreSQL URL (production) |
+| `NEXTAUTH_SECRET` | yes | Session signing secret — generate: `openssl rand -base64 32` |
+| `NEXTAUTH_URL` | no | App URL (defaults to `http://localhost:3000` in dev) |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | no | Authority account provisioned by the seed (defaults: `admin@civiclens.in` / `CivicLens@Admin2025` / `Neha Kulkarni`) |
 | `GEMINI_API_KEY` | no | Activates the **Google Gemini** adapter; empty = built-in z-ai vision provider |
 | `GEMINI_MODEL` | no | Defaults to `gemini-2.0-flash` |
 | `DUPLICATE_RADIUS_METERS` | no | Duplicate-detection radius (default 150) |
@@ -160,13 +173,13 @@ Everything you report now is real: your photos, real GPS, real Gemini analysis, 
 
 ## The exact demo scenario (verified end-to-end)
 
-1. Open CivicLens → **Continue as Citizen** (`Aarav Sharma`)
+1. Open CivicLens → **Sign in** as Citizen (`aarav@civiclens.in` / `Aarav@12345`)
 2. **Report an issue** → pick/take a photo (or a sample photo)
 3. GPS captured (or search/pick a location manually) → optional description
 4. **AI analysis** with staged progress → review screen (category, confidence, severity, hazards, department, reasoning)
 5. **Submit** → duplicate check → *link to existing incident* or *create new*
 6. Success screen with incident ID, explainable priority and routing
-7. **Sign out → Continue as Authority** (`Neha Kulkarni`) → command center
+7. **Sign out → Sign in as Authority** (`admin@civiclens.in`) → command center
 8. Open the incident → **Verify → Assign (Roads/PWD + team) → Start work**
 9. **Upload after photo** (resolution evidence) → **Resolve**
 10. Back as the citizen: dashboard shows *Resolved*, full timeline, **before/after** evidence, notification *"INC-xxxx resolved"*.
@@ -189,7 +202,8 @@ Everything you report now is real: your photos, real GPS, real Gemini analysis, 
 
 ## Limitations (honest scope statement)
 
-- **Demo authentication** is name-based (structured for NextAuth/Supabase Auth; roles CITIZEN/ADMIN already enforced on every API route).
+- **Credentials auth** (email + password). OAuth providers (Google) and phone OTP can be added via NextAuth later; admin accounts have no self-service password reset yet (re-seed or update the DB).
+- Rate limiting is in-memory (per server instance) — fine for single-instance/VPS deployments; move to Redis for multi-instance.
 - **Category-based routing**, not jurisdiction-aware routing (the state→district→city→ward model is in the data model for the future).
 - Duplicate detection is distance/category/time-based; image-embedding similarity is future work.
 - Priority is an **AI-assisted assessment**, not an official government prioritization algorithm (labelled as such in the UI).
@@ -203,6 +217,7 @@ Government/municipal API integration · advanced geospatial clustering (PostGIS)
 ## Security & privacy
 
 - API keys live only in server env vars; the frontend never receives them. `.env` is git-ignored; a repo-wide secret scan (API-key patterns) is part of the release checklist.
+- Passwords hashed with **bcrypt (cost 12)**; sessions are signed **httpOnly JWT cookies** with CSRF protection (NextAuth.js v4); sign-in/sign-up rate-limited per IP and per email.
 - All uploads validated (type, size); all API input validated (Zod / manual guards); admin routes require the ADMIN role; citizens can only submit/track their own reports.
 - Citizen identities are **never** exposed on public incident views (reporter names appear only inside the authority workflow); location is used solely to place reports on the map and route them.
 
