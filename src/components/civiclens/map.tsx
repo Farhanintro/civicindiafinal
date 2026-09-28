@@ -195,7 +195,13 @@ export default function IncidentMap({
 
   return (
     <div className={className} role="application" aria-label="Incident map">
-      <MapContainer center={center} zoom={zoom} className="h-full w-full" scrollWheelZoom>
+      <MapContainer
+        center={center}
+        zoom={zoom}
+        className="h-full w-full"
+        scrollWheelZoom
+        attributionControl={false}
+      >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -271,6 +277,7 @@ export function LocationPicker({ latitude, longitude, onPick, className }: Locat
         zoom={16}
         className="h-full w-full rounded-xl border"
         scrollWheelZoom
+        attributionControl={false}
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

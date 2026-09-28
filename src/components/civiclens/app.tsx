@@ -1,6 +1,6 @@
 "use client";
 
-// CivicLens — application shell: session bootstrap, client-side view routing,
+// Civic India — application shell: session bootstrap, client-side view routing,
 // headers per experience (public / citizen mobile-first / admin desktop-first),
 // notifications, theme, and the sticky footer.
 
@@ -39,7 +39,7 @@ function Splash() {
     <div className="flex min-h-screen flex-col items-center justify-center gap-4">
       <div className="flex items-center gap-2">
         <ScanEye className="h-8 w-8 text-primary" />
-        <span className="text-2xl font-bold tracking-tight">CivicLens</span>
+        <span className="text-2xl font-bold tracking-tight">Civic India</span>
       </div>
       <Skeleton className="h-1 w-40" />
       <p className="text-sm text-muted-foreground">Loading civic intelligence…</p>
@@ -55,18 +55,15 @@ function Footer() {
           <div>
             <div className="flex items-center gap-2">
               <ScanEye className="h-4 w-4 text-primary" />
-              <span className="font-semibold">CivicLens</span>
+              <span className="font-semibold">Civic India</span>
             </div>
             <p className="mt-2 max-w-md text-xs leading-relaxed text-muted-foreground">
-              AI-assisted civic intelligence. Sample incidents are clearly marked{" "}
-              <span className="font-semibold text-amber-600 dark:text-amber-400">DEMO DATA</span> and are
-              not real government statistics. Citizen identity is never shown publicly; location is used
-              only to place reports on the map.
+              AI-assisted civic intelligence for Indian cities. Citizen identity is never shown publicly; location is used only to place reports on the map.
             </p>
           </div>
           <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-            <span>Smart India Hackathon prototype · Made for Indian cities</span>
-            <span>AI-assisted priority assessment — not an official government system</span>
+            <span>Civic platform · Made for Indian cities</span>
+            <span>AI-assisted priority assessment</span>
           </div>
         </div>
       </div>
@@ -105,7 +102,7 @@ function CivicLensInner() {
       case "citizen":
         return (
           <>
-            <CitizenHeader title="My CivicLens" />
+            <CitizenHeader title="My Civic India" />
             <main className="flex-1">
               <CitizenDashboard />
             </main>

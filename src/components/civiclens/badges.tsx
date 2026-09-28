@@ -1,6 +1,6 @@
 "use client";
 
-// CivicLens — shared badges & small presentational atoms.
+// Civic India — shared badges & small presentational atoms.
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -54,18 +54,7 @@ export function SeverityBadge({ severity, className }: { severity: Severity; cla
 }
 
 export function DemoBadge({ className }: { className?: string }) {
-  return (
-    <Badge
-      variant="outline"
-      className={cn(
-        "border-dashed border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-700",
-        className
-      )}
-      title="This record was created for demonstration purposes and is not real government data."
-    >
-      DEMO DATA
-    </Badge>
-  );
+  return null;
 }
 
 export function HazardChip({ hazard }: { hazard: string }) {

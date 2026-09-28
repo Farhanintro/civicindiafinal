@@ -1,71 +1,278 @@
-// POST /api/auth/register — citizen self-service sign-up.
-// Email + password (bcrypt cost 12). NEVER creates ADMIN accounts — authority
-// accounts are provisioned via the seed (env-configurable). Rate limited per IP.
+// POST /api/auth/register
+// Creates a citizen account and requires email verification.
+
 import { z } from "zod";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { db } from "@/lib/db";
-import { hashPassword, normalizeEmail } from "@/lib/auth";
-import { consumeRateLimit, requestIp } from "@/lib/rate-limit";
 import { log } from "@/lib/services/logger";
+import { sendVerificationEmail } from "@/lib/services/mailer-service";
+import { Prisma } from "@prisma/client";
 
 const RegisterSchema = z.object({
   name: z
     .string()
-    .trim()
-    .min(2, "Name must be at least 2 characters.")
-    .max(60, "Name must be at most 60 characters."),
-  email: z.string().trim().toLowerCase().email("Please enter a valid email address.").max(120),
+    .min(2, "Name must be at least 2 characters")
+    .max(60, "Name is too long"),
+
+  email: z
+    .string()
+    .email("Invalid email address")
+    .toLowerCase()
+    .trim(),
+
   password: z
     .string()
-    .min(8, "Password must be at least 8 characters.")
-    .max(72, "Password must be at most 72 characters.")
-    .regex(/[A-Za-z]/, "Password must contain at least one letter.")
-    .regex(/[0-9]/, "Password must contain at least one number."),
+    .min(6, "Password must be at least 6 characters"),
 });
+
+async function nextUserPublicId(): Promise<string> {
+  const users = await db.user.findMany({
+    where: {
+      publicId: {
+        startsWith: "USR-",
+      },
+    },
+
+    select: {
+      publicId: true,
+    },
+
+    take: 500,
+
+    orderBy: {
+      publicId: "desc",
+    },
+  });
+
+  let max = 0;
+
+  for (const user of users) {
+    const number = Number(
+      user.publicId.split("-")[1]
+    );
+
+    if (Number.isFinite(number) && number > max) {
+      max = number;
+    }
+  }
+
+  return `USR-${String(max + 1).padStart(4, "0")}`;
+}
 
 export async function POST(req: Request) {
   try {
-    // 5 sign-ups / 15 min per IP
-    const ip = requestIp(req.headers);
-    if (!consumeRateLimit(`register:ip:${ip}`, 5, 15 * 60 * 1000)) {
+    const body =
+      (await req.json().catch(() => ({}))) as Record<
+        string,
+        unknown
+      >;
+
+    const parsed =
+      RegisterSchema.safeParse(body);
+
+    if (!parsed.success) {
       return Response.json(
-        { error: "Too many sign-up attempts. Please try again in a few minutes." },
-        { status: 429 }
+        {
+          error:
+            parsed.error.issues[0]?.message ??
+            "Invalid registration details.",
+        },
+        { status: 400 }
       );
     }
 
-    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-    const parsed = RegisterSchema.safeParse(body);
-    if (!parsed.success) {
-      const msg = parsed.error.issues[0]?.message ?? "Invalid sign-up details.";
-      return Response.json({ error: msg }, { status: 400 });
-    }
+    const {
+      name,
+      email,
+      password,
+    } = parsed.data;
 
-    const email = normalizeEmail(parsed.data.email);
-    const existing = await db.user.findUnique({ where: { email } });
+    /*
+     * Check duplicate account.
+     */
+    const existing = await db.user.findUnique({
+      where: {
+        email,
+      },
+    });
+
     if (existing) {
       return Response.json(
-        { error: "An account with this email already exists. Try signing in instead." },
+        {
+          error:
+            "An account with this email already exists. Please sign in.",
+        },
         { status: 409 }
       );
     }
 
-    const passwordHash = await hashPassword(parsed.data.password);
-    const count = await db.user.count();
+    /*
+     * Hash password.
+     */
+    const passwordHash =
+      await bcrypt.hash(password, 10);
+
+    /*
+     * Generate public ID.
+     */
+    const publicId =
+      await nextUserPublicId();
+
+    /*
+     * Create unverified citizen.
+     *
+     * emailVerified intentionally remains NULL.
+     */
     const user = await db.user.create({
       data: {
-        publicId: `USR-${String(count + 1).padStart(3, "0")}`,
-        name: parsed.data.name,
+        publicId,
+        name,
         email,
         passwordHash,
-        role: "CITIZEN", // sign-up is citizen-only; admin accounts are provisioned via seed
+        role: "CITIZEN",
+        isDemo: false,
       },
-      select: { publicId: true },
+
+      select: {
+        id: true,
+        publicId: true,
+        name: true,
+        email: true,
+        role: true,
+        emailVerified: true,
+      },
     });
 
-    log.info("auth_signup", { publicId: user.publicId });
-    return Response.json({ ok: true, publicId: user.publicId }, { status: 201 });
-  } catch (err) {
-    log.error("api_error", { route: "auth/register", error: String(err).slice(0, 160) });
-    return Response.json({ error: "Sign-up failed. Please try again." }, { status: 500 });
+    /*
+     * Generate a dedicated verification token.
+     *
+     * This is NOT the login JWT.
+     */
+    const verificationToken =
+      crypto.randomBytes(32).toString("hex");
+
+    /*
+     * Token valid for 24 hours.
+     */
+    const expiresAt = new Date(
+      Date.now() + 24 * 60 * 60 * 1000
+    );
+
+    await db.verificationToken.create({
+      data: {
+        email: user.email,
+        token: verificationToken,
+        expiresAt,
+      },
+    });
+
+    /*
+     * Send verification email.
+     */
+    try {
+      await sendVerificationEmail(
+        user.email,
+        verificationToken
+      );
+    } catch (mailError) {
+      /*
+       * Email failed.
+       * Do not leave a half-working account behind.
+       */
+      await db.verificationToken
+        .deleteMany({
+          where: {
+            token: verificationToken,
+          },
+        })
+        .catch(() => {});
+
+      await db.user
+        .delete({
+          where: {
+            id: user.id,
+          },
+        })
+        .catch(() => {});
+
+      log.error(
+        "verification_email_failed",
+        {
+          email: user.email,
+          error: String(mailError).slice(
+            0,
+            300
+          ),
+        }
+      );
+
+      return Response.json(
+        {
+          error:
+            "Account could not be created because the verification email could not be sent. Please try again.",
+        },
+        { status: 500 }
+      );
+    }
+
+    log.info(
+      "auth_registered_pending_verification",
+      {
+        userId: user.id,
+        email: user.email,
+      }
+    );
+
+    /*
+     * IMPORTANT:
+     *
+     * No session cookie.
+     * No automatic login.
+     */
+    return Response.json(
+      {
+        user: {
+          id: user.id,
+          publicId: user.publicId,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+        },
+
+        requiresVerification: true,
+
+        message:
+          "Account created. Please verify your email before signing in.",
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    if (
+      error instanceof
+        Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return Response.json(
+        {
+          error:
+            "An account with this email already exists. Please sign in.",
+        },
+        { status: 409 }
+      );
+    }
+
+    log.error("api_error", {
+      route: "auth/register",
+      error: String(error).slice(0, 300),
+    });
+
+    return Response.json(
+      {
+        error:
+          "Failed to register. Please try again.",
+      },
+      { status: 500 }
+    );
   }
 }

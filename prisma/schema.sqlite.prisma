@@ -18,6 +18,7 @@ model User {
   email         String?        @unique
   passwordHash  String?        // bcrypt hash (cost 12) — null for legacy/demo users without a password
   role          String         @default("CITIZEN") // CITIZEN | ADMIN
+  emailVerified DateTime?      // null = unverified, timestamp = verified
   city          String?
   isDemo        Boolean        @default(false)
   createdAt     DateTime       @default(now())
@@ -209,4 +210,14 @@ model ResolutionEvidence {
   createdAt    DateTime @default(now())
 
   @@index([incidentId])
+}
+
+model VerificationToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
 }

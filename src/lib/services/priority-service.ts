@@ -1,93 +1,101 @@
-// CivicLens — Explainable priority engine ("AI-assisted priority assessment").
-// NOT an officially validated government algorithm. Inputs & reasons are always surfaced to users.
-
-import type { Priority } from "@/lib/civiclens/types";
+// Civic India — deterministic priority assessment engine.
+import type { Priority, PriorityScoreBreakdown, Severity } from "@/lib/civiclens/types";
 
 export interface PriorityInput {
-  severityScore: number; // 1..10 (0 when unknown)
-  reportCount: number;
-  hazards: string[];
-  categoryHazardWeight: number; // from configurable Category
-  categoryLabel: string;
+  categoryKey?: string;
+  categoryHazardWeight?: number;
+  categoryLabel?: string;
+  hazardWeight?: number;
+  severityScore?: number;
+  hazards?: string[] | string | unknown;
+  reportCount?: number;
 }
 
-export interface PriorityResult {
-  score: number; // 0..100
-  priority: Priority;
-  reasons: string[];
-}
-
-/** Hazards that indicate immediate danger to life — strongest priority signal. */
 const CRITICAL_HAZARDS = new Set([
-  "fall_hazard",
-  "child_safety_risk",
-  "contamination_risk",
+  "live_wire",
+  "sparking",
   "electrical_hazard",
-  "health_risk",
+  "deep_open_manhole",
+  "open_manhole",
+  "traffic_obstruction",
+  "skid_hazard",
+  "pedestrian_fall_risk",
+  "structural_collapse",
+  "fire_risk",
+  "water_contamination",
 ]);
 
-const MAX_SCORE = 100;
+export function severityBand(score: number): Severity {
+  if (score >= 8) return "CRITICAL";
+  if (score >= 6) return "HIGH";
+  if (score >= 4) return "MEDIUM";
+  return "LOW";
+}
 
-export function assessPriority(input: PriorityInput): PriorityResult {
+function normalizeHazards(hazards: unknown): string[] {
+  if (Array.isArray(hazards)) return hazards.map(String);
+  if (typeof hazards === "string") {
+    try {
+      const parsed = JSON.parse(hazards);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {
+      return hazards.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+export function assessPriority(input: PriorityInput): PriorityScoreBreakdown {
   const reasons: string[] = [];
   let score = 0;
 
-  // 1) Visual severity from AI analysis (max 50)
-  if (input.severityScore > 0) {
-    const sev = Math.min(10, Math.max(1, input.severityScore));
-    score += sev * 5;
-    reasons.push(`AI-assessed visual severity ${sev}/10`);
+  const weight = input.categoryHazardWeight ?? input.hazardWeight ?? 0.5;
+  const catWeight = Math.max(0, Math.min(1, weight));
+  const catPoints = Math.round(catWeight * 30);
+  score += catPoints;
+  if (catPoints >= 20) {
+    reasons.push(`High inherent category hazard (+${catPoints})`);
   }
 
-  // 2) Citizen confirmations — multiple people reporting the same physical problem (max 30)
-  if (input.reportCount > 1) {
-    const capped = Math.min(input.reportCount, 10);
-    score += capped * 3;
-    reasons.push(
-      input.reportCount === 2
-        ? "2 citizen reports confirm this issue"
-        : `${input.reportCount} citizen reports confirm this issue`
-    );
-  } else {
-    score += 3;
+  const severity = Math.max(1, Math.min(10, input.severityScore ?? 5));
+  const sevPoints = Math.round((severity / 10) * 35);
+  score += sevPoints;
+  if (sevPoints >= 25) {
+    reasons.push(`High visual damage severity ${severity}/10 (+${sevPoints})`);
   }
 
-  // 3) Hazard signals (max 20)
-  const critical = input.hazards.filter((h) => CRITICAL_HAZARDS.has(h));
-  const others = input.hazards.filter((h) => !CRITICAL_HAZARDS.has(h));
+  const safeHazards = normalizeHazards(input.hazards);
+  const critical = safeHazards.filter((h) => CRITICAL_HAZARDS.has(h));
+  const others = safeHazards.filter((h) => !CRITICAL_HAZARDS.has(h));
+
   if (critical.length > 0) {
-    score += Math.min(critical.length * 8, 16);
-    reasons.push(`Critical hazard signal: ${critical.length > 1 ? `${critical.length} hazards` : "1 hazard"} (immediate danger)`);
+    const critPoints = Math.min(critical.length * 8, 16);
+    score += critPoints;
+    reasons.push(`Critical hazards identified: ${critical.join(", ")} (+${critPoints})`);
   }
   if (others.length > 0) {
-    score += Math.min(others.length, 2) * 3;
-    reasons.push(`${others.length} additional risk factor${others.length > 1 ? "s" : ""} identified`);
+    const othPoints = Math.min(others.length * 2, 4);
+    score += othPoints;
+    reasons.push(`Secondary hazards detected (+${othPoints})`);
   }
 
-  // 4) Category weight — configurable per category (e.g. open manholes weigh more)
-  if (input.categoryHazardWeight > 1) {
-    const bonus = Math.round((input.categoryHazardWeight - 1) * 20);
-    score += bonus;
-    reasons.push(`High-risk category: ${input.categoryLabel}`);
+  const reports = Math.max(1, input.reportCount ?? 1);
+  if (reports > 1) {
+    const volPoints = Math.min((reports - 1) * 5, 15);
+    score += volPoints;
+    reasons.push(`${reports} citizen confirmations (+${volPoints})`);
   }
 
-  score = Math.min(Math.round(score), MAX_SCORE);
+  const finalScore = Math.max(0, Math.min(100, score));
 
-  let priority: Priority;
-  if (score >= 80) priority = "P1";
-  else if (score >= 60) priority = "P2";
-  else if (score >= 40) priority = "P3";
-  else priority = "P4";
+  let priority: Priority = "P4";
+  if (finalScore >= 75) priority = "P1";
+  else if (finalScore >= 55) priority = "P2";
+  else if (finalScore >= 35) priority = "P3";
 
-  if (reasons.length === 0) reasons.push("Baseline assessment from report evidence");
-
-  return { score, priority, reasons };
-}
-
-/** Map a 1..10 severity score to a severity band. */
-export function severityBand(score: number): "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" {
-  if (score >= 9) return "CRITICAL";
-  if (score >= 7) return "HIGH";
-  if (score >= 4) return "MEDIUM";
-  return "LOW";
+  return {
+    score: finalScore,
+    priority,
+    reasons,
+  };
 }

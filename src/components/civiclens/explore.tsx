@@ -1,6 +1,6 @@
 "use client";
 
-// CivicLens — public "Explore issues" map view with filters, search, and an incident list.
+// Civic India — public "Explore issues" map view with filters, search, and an incident list.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
@@ -68,11 +68,6 @@ export function Explore({ focus }: { focus?: string }) {
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] flex-col">
-      {/* DEMO banner */}
-      <div className="flex items-center justify-center gap-2 border-b bg-amber-50 px-4 py-1.5 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-        <DemoBadge /> includes seeded demo incidents across Indian cities — not real government data
-      </div>
-
       {/* filters */}
       <div className="flex flex-wrap items-center gap-2 border-b bg-background px-4 py-2.5">
         <div className="relative min-w-44 flex-1 sm:max-w-xs">

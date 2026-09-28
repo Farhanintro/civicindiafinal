@@ -126,13 +126,17 @@ export function toCivicAnalysis(a: AiAnalysis): CivicAnalysis {
   };
 }
 
-function safeParseArray(json: string): string[] {
-  try {
-    const v = JSON.parse(json);
-    return Array.isArray(v) ? v : [];
-  } catch {
-    return [];
+function safeParseArray(val: unknown): string[] {
+  if (Array.isArray(val)) return val.map(String);
+  if (typeof val === "string") {
+    try {
+      const v = JSON.parse(val);
+      return Array.isArray(v) ? v.map(String) : [];
+    } catch {
+      return val.split(",").map((s) => s.trim()).filter(Boolean);
+    }
   }
+  return [];
 }
 
 // ---------- priority ----------
@@ -205,7 +209,7 @@ export async function createIncidentFromReport(opts: {
   const priority = assessPriority({
     severityScore,
     reportCount: 1,
-    hazards: analysis?.hazards ?? [],
+    hazards: safeParseArray(analysis?.hazards),
     categoryHazardWeight: category?.hazardWeight ?? 1,
     categoryLabel: catLabel,
   });

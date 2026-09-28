@@ -1,8 +1,8 @@
 "use client";
 
-// CivicLens — citizen report wizard:
-// PHOTO → LOCATION → DESCRIPTION → AI ANALYSIS → REVIEW → DUPLICATE CHECK → SUCCESS
-// Mobile-first, minimal typing, graceful fallbacks at every step.
+// Civic India — citizen report wizard:
+// PHOTO → LOCATION → DETAILS → AI ANALYSIS → REVIEW → DUPLICATE CHECK → SUCCESS
+// Blocks non-civic/fake image submissions when AI analysis returns isCivicIssue: false.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
@@ -39,7 +39,7 @@ import { formatDistance, haversineMeters } from "@/lib/civiclens/geo";
 import { INDIAN_CITIES } from "@/lib/civiclens/constants";
 import { Photo } from "../photo";
 import { CategoryIcon, HazardChip, PriorityBadge, SeverityBadge, DemoBadge } from "../badges";
-import { locationLine, timeAgo } from "@/lib/civiclens/format";
+import { locationLine } from "@/lib/civiclens/format";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
@@ -58,6 +58,7 @@ import {
   RefreshCcw,
   ScanSearch,
   Search,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   Upload,
@@ -73,10 +74,10 @@ type Step = "photo" | "location" | "details" | "analyzing" | "review" | "duplica
 const ANALYSIS_STAGES = [
   "Uploading & optimizing image…",
   "Analyzing image with AI…",
-  "Identifying civic issue…",
-  "Assessing severity…",
-  "Checking potential hazards…",
-  "Preparing incident intelligence…",
+  "Checking authenticity & civic context…",
+  "Assessing severity & hazards…",
+  "Verifying incident validity…",
+  "Preparing intelligence report…",
 ];
 
 export function ReportWizard() {
@@ -120,12 +121,10 @@ export function ReportWizard() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  // guard: require citizen session
   useEffect(() => {
     if (!user) openAuth("report");
   }, [user, openAuth]);
 
-  // ---- photo handling (client-side compression before upload / AI) ----
   const onPhotoChosen = useCallback(async (f: File) => {
     setAnalyzeError(null);
     const compressed = await compressImage(f);
@@ -133,7 +132,6 @@ export function ReportWizard() {
     setSampleKey(null);
     setSamplePath(null);
     setFileUrl(URL.createObjectURL(compressed));
-    // a new photo means a new report identity
     setIdempotencyKey(crypto.randomUUID());
     setAnalysis(null);
     setReportId(null);
@@ -152,11 +150,10 @@ export function ReportWizard() {
     setReportPublicId(null);
   }, []);
 
-  // ---- GPS ----
   const applyGeocode = useCallback(async (lat: number, lng: number) => {
     setGeoLoading(true);
-    const result = await reverseGeocode(lat, lng);
-    setGeo(result); // null → coordinates-only fallback
+    const res = await reverseGeocode(lat, lng);
+    setGeo(res);
     setGeoLoading(false);
   }, []);
 
@@ -202,7 +199,6 @@ export function ReportWizard() {
     finalLng != null &&
     haversineMeters(captureLat, captureLng, finalLat, finalLng) > 50;
 
-  // ---- run AI analysis (once per report — server enforces idempotency) ----
   const runAnalysis = useCallback(async () => {
     if (finalLat == null || finalLng == null) return;
     setStep("analyzing");
@@ -228,13 +224,12 @@ export function ReportWizard() {
       setReportPublicId(res.reportPublicId);
       setCandidates(res.duplicateCandidates ?? []);
       setCategoryOverride(res.analysis.source === "FALLBACK_MANUAL" ? null : res.analysis.categoryKey);
-      setEditing(res.analysis.source === "FALLBACK_MANUAL" || !res.analysis.isCivicIssue);
+      setEditing(false);
       setTimeout(() => setStep("review"), 450);
     } catch (err) {
       clearInterval(timer);
       const message = err instanceof ApiError ? err.message : "Analysis failed. Please try again.";
       if (err instanceof ApiError && err.status === 409) {
-        // the same report is still being processed — bounded retry, then surface the error
         retryCountRef.current += 1;
         if (retryCountRef.current <= 5) {
           setTimeout(() => void runAnalysis(), 2500);
@@ -242,18 +237,26 @@ export function ReportWizard() {
         }
       }
       setAnalyzeError(message);
-      setStep("details"); // let the citizen retry; nothing is lost
+      setStep("details");
       toast({
         title: "AI analysis unavailable",
-        description: message + " You can retry — your photo, location and description are preserved.",
+        description: message,
         variant: "destructive",
       });
     }
   }, [file, sampleKey, idempotencyKey, finalLat, finalLng, captureTimestamp, description, toast]);
 
-  // ---- submit (duplicate check → link or create) ----
   const doSubmit = useCallback(
     async (decision?: "link" | "new", linkToIncidentPublicId?: string) => {
+      if (!analysis?.isCivicIssue) {
+        toast({
+          title: "Submission Blocked",
+          description: "Cannot submit: The AI verified that this image is not a genuine civic infrastructure issue.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       if (!reportId) return;
       setSubmitting(true);
       try {
@@ -278,14 +281,14 @@ export function ReportWizard() {
       } catch (err) {
         toast({
           title: "Submission failed",
-          description: err instanceof ApiError ? err.message : "Please try again — your report is safe.",
+          description: err instanceof ApiError ? err.message : "Please try again.",
           variant: "destructive",
         });
       } finally {
         setSubmitting(false);
       }
     },
-    [reportId, categoryOverride, analysis, description, finalLat, finalLng, geo, locationChanged, toast]
+    [analysis, reportId, categoryOverride, description, finalLat, finalLng, geo, locationChanged, toast]
   );
 
   const resetWizard = useCallback(() => {
@@ -329,8 +332,6 @@ export function ReportWizard() {
     }, 500);
   }, [searchQ]);
 
-  // ---------- renders ----------
-
   if (!user) {
     return (
       <div className="mx-auto flex max-w-md flex-col items-center gap-4 px-4 py-16 text-center">
@@ -343,7 +344,6 @@ export function ReportWizard() {
 
   return (
     <div className="mx-auto w-full max-w-xl px-4 pb-16 pt-6">
-      {/* step header */}
       {step !== "analyzing" && step !== "success" ? (
         <div className="mb-5">
           <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
@@ -351,7 +351,7 @@ export function ReportWizard() {
               {step === "photo" && "Step 1 of 4 · Evidence"}
               {step === "location" && "Step 2 of 4 · Location"}
               {step === "details" && "Step 3 of 4 · Details"}
-              {step === "review" && "Step 4 of 4 · AI review & submit"}
+              {step === "review" && "Step 4 of 4 · AI review & verification"}
               {step === "duplicate" && "Duplicate check"}
             </span>
             {reportPublicId ? <span className="font-mono">{reportPublicId}</span> : null}
@@ -365,13 +365,13 @@ export function ReportWizard() {
         </div>
       ) : null}
 
-      {/* ---------------- PHOTO ---------------- */}
+      {/* ---------------- STEP 1: PHOTO ---------------- */}
       {step === "photo" ? (
         <div className="space-y-5">
           <div>
             <h1 className="text-xl font-bold">What did you see?</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              A clear photo is all CivicLens needs — our AI identifies the issue, severity and hazards.
+              A clear photo is all Civic India needs — our AI identifies genuine civic issues and rejects non-issues.
             </p>
           </div>
 
@@ -392,7 +392,7 @@ export function ReportWizard() {
               <CardContent className="flex items-center justify-between gap-2 p-3">
                 <p className="text-xs text-muted-foreground">
                   {sampleKey
-                    ? "Sample photo — precomputed demo analysis will be used (zero AI quota)."
+                    ? "Sample photo selected."
                     : `Photo ready · ${(file ? file.size / 1024 : 0).toFixed(0)} KB after compression`}
                 </p>
                 <Button variant="outline" size="sm" onClick={() => { setFile(null); setFileUrl(null); setSampleKey(null); setSamplePath(null); }}>
@@ -449,7 +449,7 @@ export function ReportWizard() {
 
           <div>
             <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <ImagePlus className="h-3.5 w-3.5" /> No civic issue handy? Use a sample photo for demo:
+              <ImagePlus className="h-3.5 w-3.5" /> Demo options:
             </p>
             <div className="cl-scroll -mx-1 flex gap-2 overflow-x-auto px-1 pb-2">
               {samples.map((s) => (
@@ -484,13 +484,13 @@ export function ReportWizard() {
         </div>
       ) : null}
 
-      {/* ---------------- LOCATION ---------------- */}
+      {/* ---------------- STEP 2: LOCATION ---------------- */}
       {step === "location" ? (
         <div className="space-y-5">
           <div>
             <h1 className="text-xl font-bold">Where is the issue?</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              We use your location only to place this report on the map and route it to the right authority.
+              Location is used only to place this report and route it to the right authority.
             </p>
           </div>
 
@@ -515,7 +515,7 @@ export function ReportWizard() {
                   <p className="text-emerald-700 dark:text-emerald-400">{geo.display}</p>
                 ) : (
                   <p className="text-emerald-700 dark:text-emerald-400">
-                    Coordinates: {finalLat?.toFixed(5)}, {finalLng?.toFixed(5)} (address lookup unavailable — coordinates will be used)
+                    Coordinates: {finalLat?.toFixed(5)}, {finalLng?.toFixed(5)}
                   </p>
                 )}
               </div>
@@ -529,7 +529,7 @@ export function ReportWizard() {
                 <div>
                   <p className="font-semibold text-amber-800 dark:text-amber-300">Location permission unavailable</p>
                   <p className="text-amber-700 dark:text-amber-400">
-                    No problem — search for a place or tap the map to set the location manually.
+                    Search for a place or tap the map to position manually.
                   </p>
                 </div>
               </div>
@@ -544,13 +544,8 @@ export function ReportWizard() {
               <LocationPicker latitude={finalLat} longitude={finalLng} onPick={onManualLocation} />
               <p className="text-center text-xs text-muted-foreground">
                 <MapPin className="mr-1 inline h-3 w-3" />
-                Drag the pin or tap the map to fine-tune · {finalLat.toFixed(5)}, {finalLng.toFixed(5)}
+                Drag pin or tap map to adjust · {finalLat.toFixed(5)}, {finalLng.toFixed(5)}
               </p>
-              {locationChanged ? (
-                <p className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-center text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                  Location changed from the original capture position — your adjusted location will be used.
-                </p>
-              ) : null}
             </div>
           ) : (
             <div className="space-y-3">
@@ -558,10 +553,9 @@ export function ReportWizard() {
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
                   className="h-11 w-full rounded-xl border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  placeholder="Search a place (e.g. 'Collectorate, Alwar')…"
+                  placeholder="Search a place…"
                   value={searchQ}
                   onChange={(e) => setSearchQ(e.target.value)}
-                  aria-label="Search location"
                 />
               </div>
               {searchHits.length > 0 ? (
@@ -585,27 +579,24 @@ export function ReportWizard() {
                   ))}
                 </ul>
               ) : null}
-              <div>
-                <p className="mb-2 text-xs font-medium text-muted-foreground">Or pick a city centre:</p>
-                <div className="flex flex-wrap gap-2">
-                  {INDIAN_CITIES.map((c) => (
-                    <Button
-                      key={c.city}
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setFinalLat(c.lat);
-                        setFinalLng(c.lng);
-                        setCaptureLat(c.lat);
-                        setCaptureLng(c.lng);
-                        setCaptureTimestamp(new Date().toISOString());
-                        setGeo({ display: `${c.city}, ${c.state}`, city: c.city, state: c.state });
-                      }}
-                    >
-                      {c.city}
-                    </Button>
-                  ))}
-                </div>
+              <div className="flex flex-wrap gap-2">
+                {INDIAN_CITIES.map((c) => (
+                  <Button
+                    key={c.city}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setFinalLat(c.lat);
+                      setFinalLng(c.lng);
+                      setCaptureLat(c.lat);
+                      setCaptureLng(c.lng);
+                      setCaptureTimestamp(new Date().toISOString());
+                      setGeo({ display: `${c.city}, ${c.state}`, city: c.city, state: c.state });
+                    }}
+                  >
+                    {c.city}
+                  </Button>
+                ))}
               </div>
             </div>
           )}
@@ -621,31 +612,15 @@ export function ReportWizard() {
         </div>
       ) : null}
 
-      {/* ---------------- DETAILS ---------------- */}
+      {/* ---------------- STEP 3: DETAILS ---------------- */}
       {step === "details" ? (
         <div className="space-y-5">
           <div>
             <h1 className="text-xl font-bold">Anything to add?</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Optional — a short description helps authorities, but the photo does the heavy lifting.
+              Optional description to help authorities inspect and verify.
             </p>
           </div>
-
-          {hasPhoto ? (
-            <div className="flex items-center gap-3 rounded-xl border p-3">
-              <span className="h-14 w-20 shrink-0 overflow-hidden rounded-lg">
-                {fileUrl ? (
-                  <Photo src={fileUrl} alt="Your photo" width={80} height={56} className="h-full w-full object-cover" />
-                ) : samplePath ? (
-                  <Photo src={samplePath} alt="Sample photo" width={80} height={56} className="h-full w-full object-cover" />
-                ) : null}
-              </span>
-              <div className="min-w-0 text-xs text-muted-foreground">
-                <p className="font-mono">{finalLat?.toFixed(4)}, {finalLng?.toFixed(4)}</p>
-                <p className="mt-0.5 truncate">{geo?.display ?? "Coordinates captured"}</p>
-              </div>
-            </div>
-          ) : null}
 
           <div className="space-y-2">
             <Label htmlFor="cl-desc">Description (optional)</Label>
@@ -653,19 +628,12 @@ export function ReportWizard() {
               id="cl-desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="e.g. Deep water-filled pothole near the bus stop, two-wheelers swerve to avoid it…"
+              placeholder="e.g. Deep pothole right before the traffic turn, hazardous for two-wheelers…"
               rows={4}
               maxLength={600}
             />
             <p className="text-right text-xs text-muted-foreground">{description.length}/600</p>
           </div>
-
-          {analyzeError ? (
-            <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
-              <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{analyzeError}</span>
-            </div>
-          ) : null}
 
           <div className="flex gap-2">
             <Button variant="outline" className="h-12 flex-1" onClick={() => setStep("location")}>
@@ -709,159 +677,156 @@ export function ReportWizard() {
             ))}
           </div>
           <p className="max-w-xs text-center text-xs text-muted-foreground">
-            AI is called once per report. Results are stored — refreshing or reopening never re-bills the analysis.
+            Verifying image legitimacy and safety hazards...
           </p>
         </div>
       ) : null}
 
-      {/* ---------------- REVIEW ---------------- */}
+      {/* ---------------- STEP 4: REVIEW & STRICT VERIFICATION ---------------- */}
       {step === "review" && analysis ? (
         <div className="space-y-5">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="gap-1 border-primary/40 bg-primary/5 text-primary">
-                  <Sparkles className="h-3 w-3" /> AI DETECTED
-                </Badge>
-                {analysis.source === "DEMO_PRECOMPUTED" ? <DemoBadge /> : null}
-              </div>
-              <h1 className="mt-2 flex items-center gap-2 text-2xl font-bold">
-                <CategoryIcon categoryKey={activeCategoryKey} className="h-6 w-6 text-primary" />
-                {activeCategory?.label ?? "Civic issue"}
-              </h1>
-            </div>
-            <SeverityBadge severity={analysis.severity} />
-          </div>
-
-          {analysis.source === "FALLBACK_MANUAL" || !analysis.isCivicIssue ? (
-            <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-800 dark:bg-amber-950">
-              <p className="font-semibold text-amber-800 dark:text-amber-300">
-                {analysis.source === "FALLBACK_MANUAL"
-                  ? "AI analysis temporarily unavailable."
-                  : "AI could not confidently identify a civic issue in this photo."}
-              </p>
-              <p className="mt-1 text-amber-700 dark:text-amber-400">
-                Your report has been saved and can be reviewed manually — please pick a category below, or edit and resubmit.
-              </p>
-            </div>
-          ) : null}
-
-          <Card>
-            <CardContent className="space-y-4 p-5">
-              {/* confidence */}
-              <div>
-                <div className="mb-1 flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Confidence</span>
-                  <span className="font-bold">{Math.round(analysis.confidence * 100)}%</span>
-                </div>
-                <Progress value={analysis.confidence * 100} className="h-2" />
-              </div>
-
-              {analysis.hazards.length > 0 ? (
-                <div>
-                  <p className="mb-2 text-sm font-medium">Potential hazards</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {analysis.hazards.map((h) => (
-                      <HazardChip key={h} hazard={h} />
-                    ))}
+          {/* CASE A: AI REJECTED (NON-CIVIC) */}
+          {!analysis.isCivicIssue ? (
+            <div className="space-y-4">
+              <div className="rounded-2xl border-2 border-destructive/40 bg-destructive/10 p-5 text-destructive dark:bg-destructive/20">
+                <div className="flex items-start gap-3">
+                  <ShieldAlert className="mt-0.5 h-7 w-7 shrink-0 text-destructive" />
+                  <div>
+                    <h2 className="text-lg font-bold text-destructive">Submission Blocked: Non-Civic Image Detected</h2>
+                    <p className="mt-1 text-sm leading-relaxed text-destructive/90">
+                      Our Vision AI verified that this image does not depict a genuine civic infrastructure defect (e.g. pothole, garbage dump, broken streetlight, or water leakage).
+                    </p>
                   </div>
                 </div>
-              ) : null}
-
-              <div className="grid gap-3 text-sm sm:grid-cols-2">
-                <div className="rounded-lg bg-muted/60 p-3">
-                  <p className="text-xs text-muted-foreground">Recommended department</p>
-                  <p className="mt-0.5 font-semibold">{activeDepartment?.name ?? "General Municipal"}</p>
-                </div>
-                <div className="rounded-lg bg-muted/60 p-3">
-                  <p className="text-xs text-muted-foreground">Recommended action</p>
-                  <p className="mt-0.5 font-semibold">{analysis.recommendedAction}</p>
-                </div>
+                {analysis.reasoning ? (
+                  <div className="mt-3 rounded-lg border border-destructive/20 bg-background/80 p-3 text-xs text-foreground">
+                    <span className="font-semibold">AI Inspection Verdict: </span>
+                    {analysis.reasoning}
+                  </div>
+                ) : null}
               </div>
 
-              <p className="text-sm leading-relaxed">
-                <span className="font-medium">AI description: </span>
-                {analysis.description}
-              </p>
-
-              {analysis.reasoning ? (
-                <Collapsible>
-                  <CollapsibleTrigger className="flex items-center gap-1 text-xs font-medium text-primary">
-                    <ChevronDown className="h-3.5 w-3.5" /> Why this classification?
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-2 rounded-lg bg-muted/60 p-3 text-xs leading-relaxed text-muted-foreground">
-                    {analysis.reasoning}
-                    <span className="mt-2 block opacity-70">
-                      Model: {analysis.model} · source: {analysis.source} · {analysis.processingMs} ms
-                    </span>
-                  </CollapsibleContent>
-                </Collapsible>
-              ) : null}
-            </CardContent>
-          </Card>
-
-          {/* edit panel */}
-          {editing ? (
-            <Card className="border-primary/40">
-              <CardContent className="space-y-3 p-4">
-                <div className="flex items-center justify-between">
-                  <p className="flex items-center gap-1.5 text-sm font-semibold">
-                    <Pencil className="h-4 w-4 text-primary" /> Edit classification
-                  </p>
-                </div>
-                <div>
-                  <Label className="mb-1.5 block text-xs">Issue category</Label>
-                  <Select value={activeCategoryKey} onValueChange={setCategoryOverride}>
-                    <SelectTrigger className="h-10">
-                      <SelectValue placeholder="Choose category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categories.map((c) => (
-                        <SelectItem key={c.key} value={c.key}>
-                          {c.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="mb-1.5 block text-xs" htmlFor="cl-desc-edit">
-                    Description
-                  </Label>
-                  <Textarea
-                    id="cl-desc-edit"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    rows={3}
-                    maxLength={600}
-                    placeholder="Optional details for authorities…"
-                  />
-                </div>
-              </CardContent>
-            </Card>
+              <div className="flex flex-col gap-2 pt-2">
+                <Button className="h-12 w-full text-base font-semibold" onClick={resetWizard}>
+                  <Camera className="mr-2 h-4 w-4" /> Take a Photo of a Real Civic Issue
+                </Button>
+                <Button variant="outline" className="h-10 w-full" onClick={() => setStep("photo")}>
+                  <ChevronLeft className="mr-1 h-4 w-4" /> Go Back to Upload Step
+                </Button>
+              </div>
+            </div>
           ) : (
-            <Button variant="ghost" size="sm" className="text-primary" onClick={() => setEditing(true)}>
-              <Pencil className="mr-1 h-3.5 w-3.5" /> Edit category / description
-            </Button>
-          )}
+            /* CASE B: GENUINE CIVIC ISSUE */
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="gap-1 border-emerald-500/40 bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                      <CheckCircle2 className="h-3 w-3" /> VERIFIED CIVIC DEFECT
+                    </Badge>
+                  </div>
+                  <h1 className="mt-2 flex items-center gap-2 text-2xl font-bold">
+                    <CategoryIcon categoryKey={activeCategoryKey} className="h-6 w-6 text-primary" />
+                    {activeCategory?.label ?? "Civic issue"}
+                  </h1>
+                </div>
+                <SeverityBadge severity={analysis.severity} />
+              </div>
 
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              className="h-12 flex-1"
-              onClick={() => setStep("details")}
-              disabled={submitting}
-            >
-              <ChevronLeft className="mr-1 h-4 w-4" /> Back
-            </Button>
-            <Button className="h-12 flex-[2] text-base" size="lg" disabled={submitting} onClick={() => void doSubmit()}>
-              {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
-              Submit Report
-            </Button>
-          </div>
-          <p className="text-center text-xs text-muted-foreground">
-            Next: we check for nearby existing incidents before creating a new one.
-          </p>
+              <Card>
+                <CardContent className="space-y-4 p-5">
+                  <div>
+                    <div className="mb-1 flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">AI Confidence</span>
+                      <span className="font-bold">{Math.round(analysis.confidence * 100)}%</span>
+                    </div>
+                    <Progress value={analysis.confidence * 100} className="h-2" />
+                  </div>
+
+                  {analysis.hazards.length > 0 ? (
+                    <div>
+                      <p className="mb-2 text-sm font-medium">Detected hazards</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {analysis.hazards.map((h) => (
+                          <HazardChip key={h} hazard={h} />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="grid gap-3 text-sm sm:grid-cols-2">
+                    <div className="rounded-lg bg-muted/60 p-3">
+                      <p className="text-xs text-muted-foreground">Target Department</p>
+                      <p className="mt-0.5 font-semibold">{activeDepartment?.name ?? "General Municipal"}</p>
+                    </div>
+                    <div className="rounded-lg bg-muted/60 p-3">
+                      <p className="text-xs text-muted-foreground">Action Recommended</p>
+                      <p className="mt-0.5 font-semibold">{analysis.recommendedAction}</p>
+                    </div>
+                  </div>
+
+                  <p className="text-sm leading-relaxed">
+                    <span className="font-medium">AI Analysis: </span>
+                    {analysis.description}
+                  </p>
+
+                  {analysis.reasoning ? (
+                    <Collapsible>
+                      <CollapsibleTrigger className="flex items-center gap-1 text-xs font-medium text-primary">
+                        <ChevronDown className="h-3.5 w-3.5" /> Technical reasoning
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="mt-2 rounded-lg bg-muted/60 p-3 text-xs leading-relaxed text-muted-foreground">
+                        {analysis.reasoning}
+                      </CollapsibleContent>
+                    </Collapsible>
+                  ) : null}
+                </CardContent>
+              </Card>
+
+              {editing ? (
+                <Card className="border-primary/40">
+                  <CardContent className="space-y-3 p-4">
+                    <p className="flex items-center gap-1.5 text-sm font-semibold">
+                      <Pencil className="h-4 w-4 text-primary" /> Edit category
+                    </p>
+                    <div>
+                      <Select value={activeCategoryKey} onValueChange={setCategoryOverride}>
+                        <SelectTrigger className="h-10">
+                          <SelectValue placeholder="Choose category" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {categories.map((c) => (
+                            <SelectItem key={c.key} value={c.key}>
+                              {c.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : (
+                <Button variant="ghost" size="sm" className="text-primary" onClick={() => setEditing(true)}>
+                  <Pencil className="mr-1 h-3.5 w-3.5" /> Change category
+                </Button>
+              )}
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="h-12 flex-1"
+                  onClick={() => setStep("details")}
+                  disabled={submitting}
+                >
+                  <ChevronLeft className="mr-1 h-4 w-4" /> Back
+                </Button>
+                <Button className="h-12 flex-[2] text-base font-semibold" size="lg" disabled={submitting} onClick={() => void doSubmit()}>
+                  {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                  Submit Verified Report
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       ) : null}
 
@@ -936,7 +901,6 @@ export function ReportWizard() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-mono text-lg font-bold">{result.incident.publicId}</span>
                 <div className="flex items-center gap-2">
-                  {result.incident.isDemo ? <DemoBadge /> : null}
                   <PriorityBadge priority={result.incident.priority} />
                 </div>
               </div>
@@ -958,24 +922,6 @@ export function ReportWizard() {
                   <span className="text-muted-foreground">Citizen reports: </span>
                   {result.incident.reportCount}
                 </p>
-                <p>
-                  <span className="text-muted-foreground">Status: </span>
-                  {result.incident.status.replace("_", " ")}
-                </p>
-                <p>
-                  <span className="text-muted-foreground">Priority score: </span>
-                  {result.incident.priorityScore}/100
-                </p>
-              </div>
-              <div className="rounded-lg bg-muted/60 p-3">
-                <p className="mb-1 text-xs font-semibold">Why this priority (AI-assisted assessment)</p>
-                <ul className="space-y-1 text-xs text-muted-foreground">
-                  {result.incident.priorityReasons.map((r, i) => (
-                    <li key={i} className="flex items-start gap-1.5">
-                      <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-600" /> {r}
-                    </li>
-                  ))}
-                </ul>
               </div>
             </CardContent>
           </Card>

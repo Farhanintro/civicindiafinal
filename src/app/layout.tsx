@@ -14,11 +14,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CivicLens — AI-Powered Civic Issue Reporting",
+  title: "Civic India — AI-Powered Civic Issue Reporting",
   description:
     "See a problem. Report it. Track the action. AI-powered civic intelligence that transforms citizen evidence into actionable infrastructure incidents.",
-  keywords: ["CivicLens", "civic tech", "pothole report", "municipal", "Smart India Hackathon", "AI", "geolocation"],
-  authors: [{ name: "CivicLens" }],
+  keywords: ["Civic India", "civic tech", "pothole report", "municipal", "Smart India Hackathon", "AI", "geolocation"],
+  authors: [{ name: "Civic India" }],
   icons: { icon: "/favicon.svg" },
 };
 

@@ -1,6 +1,6 @@
 "use client";
 
-// CivicLens — admin command center layout: desktop-first sidebar + top bar, responsive.
+// Civic India — admin command center layout: desktop-first sidebar + top bar, responsive.
 
 import { useCivicLens, type AdminTab } from "@/store/civiclens";
 import { Button } from "@/components/ui/button";
@@ -60,7 +60,7 @@ export function AdminLayout({ tab, children }: { tab: AdminTab; children: React.
             <ScanEye className="h-4.5 w-4.5" />
           </span>
           <div>
-            <div className="text-sm font-bold leading-none">CivicLens</div>
+            <div className="text-sm font-bold leading-none">Civic India</div>
             <div className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
               Command Center
             </div>
@@ -102,7 +102,7 @@ export function AdminLayout({ tab, children }: { tab: AdminTab; children: React.
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <ScanEye className="h-4.5 w-4.5" />
             </span>
-            <span className="text-sm font-bold">CivicLens Command</span>
+            <span className="text-sm font-bold">Civic India Command</span>
           </div>
           <div className="hidden lg:block">
             <p className="text-sm font-semibold">{NAV.find((n) => n.tab === tab)?.label}</p>

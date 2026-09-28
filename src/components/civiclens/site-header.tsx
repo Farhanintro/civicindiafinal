@@ -1,6 +1,6 @@
 "use client";
 
-// CivicLens — public site header (landing / explore / incident views).
+// Civic India — public site header (landing / explore / incident views).
 
 import { useTheme } from "next-themes";
 import { useCivicLens } from "@/store/civiclens";
@@ -27,12 +27,12 @@ export function SiteHeader() {
         <button
           className="flex items-center gap-2"
           onClick={() => setView({ name: "landing" })}
-          aria-label="CivicLens home"
+          aria-label="Civic India home"
         >
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <ScanEye className="h-4.5 w-4.5" />
           </span>
-          <span className="text-lg font-bold tracking-tight">CivicLens</span>
+          <span className="text-lg font-bold tracking-tight">Civic India</span>
         </button>
 
         <nav className="flex items-center gap-1 sm:gap-2" aria-label="Main navigation">

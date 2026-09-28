@@ -1,6 +1,6 @@
 "use client";
 
-// CivicLens — admin command center dashboard: KPIs, live map, priority queue, snapshot.
+// Civic India — admin command center dashboard: KPIs, live map, priority queue, snapshot.
 
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
@@ -78,7 +78,7 @@ export function AdminDashboard() {
         <div>
           <h1 className="text-lg font-bold">Civic intelligence overview</h1>
           <p className="text-xs text-muted-foreground">
-            Live data across India · includes <DemoBadge className="px-1.5 py-0 text-[9px]" /> seeded incidents
+            Live data across India
           </p>
         </div>
         <Button size="sm" variant="outline" onClick={() => setView({ name: "admin", tab: "incidents" })}>

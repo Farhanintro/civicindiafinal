@@ -1,6 +1,6 @@
 "use client";
 
-// CivicLens — admin India map view: nationwide incidents with jurisdiction filters.
+// Civic India — admin India map view: nationwide incidents with jurisdiction filters.
 
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
@@ -72,8 +72,7 @@ export function AdminMap() {
         <div>
           <h1 className="text-lg font-bold">India map view</h1>
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <DemoBadge className="px-1.5 py-0 text-[9px]" /> includes seeded demo incidents ·{" "}
-            {incidents?.length ?? 0} shown
+            {incidents?.length ?? 0} incidents shown
           </p>
         </div>
         {hasFilters ? (

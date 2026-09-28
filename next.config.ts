@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["192.168.1.12"],
   output: "standalone",
   images: {
     // incident photos stored in Supabase Storage (public bucket URLs)

@@ -1,10 +1,4 @@
-// CivicLens — Prisma Schema (PRODUCTION: Supabase PostgreSQL)
-// REPORT = individual citizen submission. INCIDENT = the physical problem.
-// One INCIDENT links many REPORTs (incident clustering / duplicate detection).
-//
-// • url        → runtime client (use the Supabase TRANSACTION pooler :6543 with ?pgbouncer=true)
-// • directUrl  → Prisma CLI: db push / migrations (use SESSION pooler :5432 or direct connection)
-// Offline/local SQLite development uses prisma/schema.sqlite.prisma instead (bun run db:push:local).
+// CivicLens — Prisma Schema (PRODUCTION / SUPABASE: PostgreSQL)
 
 generator client {
   provider = "prisma-client-js"
@@ -23,6 +17,7 @@ model User {
   email         String?        @unique
   passwordHash  String?        // bcrypt hash (cost 12) — null for legacy/demo users without a password
   role          String         @default("CITIZEN") // CITIZEN | ADMIN
+  emailVerified DateTime?      // null = unverified, timestamp = verified
   city          String?
   isDemo        Boolean        @default(false)
   createdAt     DateTime       @default(now())
@@ -214,4 +209,14 @@ model ResolutionEvidence {
   createdAt    DateTime @default(now())
 
   @@index([incidentId])
+}
+
+model VerificationToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
 }
