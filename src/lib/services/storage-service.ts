@@ -7,6 +7,7 @@
 //
 // The interface (validateImage + storeImage) is intentionally small so callers
 // (reports/analyze, incidents/evidence) never change when the provider changes.
+import "server-only";
 
 import { randomUUID } from "crypto";
 import { createHash } from "crypto";

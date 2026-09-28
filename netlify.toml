@@ -1,0 +1,7 @@
+[build]
+  command = "bun run build"
+  publish = ".next"
+
+[build.environment]
+  SECRETS_SCAN_OMIT_PATHS = ".netlify/.next/cache/**,.netlify/.next/server/**,.netlify/.next/standalone/**,.netlify/functions-internal/**"
+  SECRETS_SCAN_OMIT_KEYS = "SUPABASE_STORAGE_BUCKET,GEMINI_MODEL"

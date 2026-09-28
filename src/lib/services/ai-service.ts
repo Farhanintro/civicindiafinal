@@ -9,7 +9,7 @@
 //
 // One analysis per report. Results are persisted in `ai_analyses` and returned from
 // storage on any repeat request (never re-billed / re-called).
-
+import "server-only";
 import { z } from "zod";
 import { log } from "./logger";
 import { DEFAULT_CATEGORIES } from "@/lib/civiclens/constants";
