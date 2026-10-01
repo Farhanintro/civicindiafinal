@@ -117,6 +117,7 @@ export function ReportWizard() {
   const [candidates, setCandidates] = useState<DuplicateCandidate[]>([]);
   const [result, setResult] = useState<{ incident: IncidentSummary; linked: boolean } | null>(null);
   const retryCountRef = useRef(0);
+  const runAnalysisRef = useRef<() => void>(() => {});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -232,7 +233,7 @@ export function ReportWizard() {
       if (err instanceof ApiError && err.status === 409) {
         retryCountRef.current += 1;
         if (retryCountRef.current <= 5) {
-          setTimeout(() => void runAnalysis(), 2500);
+          setTimeout(() => void runAnalysisRef.current(), 2500);
           return;
         }
       }
@@ -245,6 +246,9 @@ export function ReportWizard() {
       });
     }
   }, [file, sampleKey, idempotencyKey, finalLat, finalLng, captureTimestamp, description, toast]);
+  useEffect(() => {
+    runAnalysisRef.current = runAnalysis;
+  }, [runAnalysis]);
 
   const doSubmit = useCallback(
     async (decision?: "link" | "new", linkToIncidentPublicId?: string) => {

@@ -35,36 +35,37 @@ import {
   MapPin,
   Flame,
   Zap,
+  Network,
 } from "lucide-react";
 
 const WORKFLOW_STEPS = [
   {
     step: "01",
-    icon: Camera,
-    title: "Capture & Geotag",
-    tagline: "Point, snap, and confirm",
-    body: "Take a photo of any civic defect. Civic India captures high-precision GPS coordinates, strips unneeded EXIF metadata, and compresses the image by up to 95% on-device for instantaneous mobile uploads.",
+    icon: Network,
+    title: "System Integration",
+    tagline: "Connecting platforms",
+    body: "Ingests complaints from multiple simulated municipal, state, and departmental grievance portals into a centralized Common Civic Schema via secure API adapters.",
   },
   {
     step: "02",
     icon: Sparkles,
-    title: "Multimodal AI Inspection",
-    tagline: "Computer vision triage",
-    body: "Our multimodal Vision AI classifies the issue category, gauges visual severity on a 1–10 scale, checks for public safety hazards (live wires, traffic obstruction, pedestrian falls), and suggests the responsible municipal department.",
+    title: "AI Triage & Linking",
+    tagline: "Deduplication at scale",
+    body: "Our multimodal Vision AI classifies issue categories and assesses severity, while the spatial engine clusters related reports into Unified Civic Cases to eliminate duplicate tickets.",
   },
   {
     step: "03",
-    icon: Layers,
-    title: "Spatial Clustering & Deduplication",
-    tagline: "Eliminating ticket clutter",
-    body: "Incoming reports within 50–100 meters of an active issue are grouped together. Multiple citizen submissions reinforce a single incident's urgency rather than spamming municipal inboxes with duplicate tickets.",
+    icon: ShieldCheck,
+    title: "SLA & Root Cause Analysis",
+    tagline: "Intelligence & accountability",
+    body: "Configurable SLAs automatically track deadlines and escalate breaches. The Civic Intelligence engine analyzes historical data to recommend root cause fixes for recurring issues.",
   },
   {
     step: "04",
-    icon: ShieldCheck,
-    title: "Verified Action & Resolution",
-    tagline: "Accountability with photo proof",
-    body: "Municipal crews receive prioritized work orders. Tickets cannot be closed without uploading verified 'after' photos, providing citizens with complete transparency through public resolution timelines.",
+    icon: CheckCircle2,
+    title: "Unified Command Center",
+    tagline: "Cross-platform visibility",
+    body: "Provides officers with a comprehensive view of all cross-platform incidents, complete with department routing, resolution evidence tracking, and immutable audit logs.",
   },
 ];
 
@@ -118,26 +119,27 @@ export function Landing() {
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className="gap-1.5 border-primary/40 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
                   <Sparkles className="h-3.5 w-3.5 text-primary" />
-                  Next-Gen Municipal Intelligence
+                  CIVIC INDIA 2.0
                 </Badge>
                 <Badge variant="secondary" className="gap-1 px-2.5 py-0.5 text-xs text-muted-foreground">
                   <Activity className="h-3 w-3 text-emerald-600" />
-                  Live Across Indian Cities
+                  SIH26129 — Government Interoperability
                 </Badge>
               </div>
 
               <div className="space-y-2">
                 <h1 className="text-3xl font-extrabold tracking-tight sm:text-5xl lg:text-5xl">
-                  Empowering Citizens. <br />
+                  Connect Fragmented
+                  <br />
                   <span className="bg-gradient-to-r from-primary to-teal-700 bg-clip-text text-transparent dark:to-teal-300">
-                    Transforming Cities.
+                    Government Services.
                   </span>
                 </h1>
                 <p className="text-base font-semibold text-primary sm:text-lg">
-                  “See a problem. Report it. Track the action.”
+                  AI-Powered Government Interoperability & Civic Intelligence
                 </p>
                 <p className="max-w-xl text-sm text-muted-foreground sm:text-base sm:leading-relaxed">
-                  Civic India converts scattered, geo-tagged citizen photos into verified, deduplicated municipal work orders — bringing AI-driven triage and accountability to urban governance.
+                  CIVIC INDIA acts as an intelligent interoperability layer between fragmented government digital platforms — turning scattered citizen reports into unified civic cases with AI-driven triage, department routing, and verified resolution.
                 </p>
               </div>
 
@@ -155,21 +157,21 @@ export function Landing() {
               <div className="grid grid-cols-3 gap-3 border-t border-border/60 pt-4">
                 <div>
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                    <CheckCircle2 className="h-4 w-4 text-primary" /> 100% Transparent
+                    <Layers className="h-4 w-4 text-primary" /> Interoperable
                   </div>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">Open timelines & proof</p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">5+ govt system connectors</p>
                 </div>
                 <div>
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                    <Layers className="h-4 w-4 text-primary" /> Zero Clutter
+                    <Building2 className="h-4 w-4 text-primary" /> Unified Cases
                   </div>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">Deduplication engine</p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">Cross-platform linking</p>
                 </div>
                 <div>
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                    <ShieldCheck className="h-4 w-4 text-primary" /> Verified Closure
+                    <ShieldCheck className="h-4 w-4 text-primary" /> AI Intelligence
                   </div>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">Mandatory after-photos</p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">Root cause & verification</p>
                 </div>
               </div>
             </div>

@@ -138,6 +138,7 @@ async function analyzeWithZAi(input: AnalyzeImageInput): Promise<CivicAnalysisRe
 
   const response = await withTimeout(
     zai.chat.completions.createVision({
+      model: "gpt-4o-mini",
       messages: [
         {
           role: "user",

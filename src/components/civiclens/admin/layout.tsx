@@ -23,14 +23,34 @@ import {
   LogOut,
   User,
   Home,
+  Network,
+  FolderKanban,
+  BrainCircuit,
+  Clock,
+  ScrollText,
+  ShieldCheck,
+  FileCheck,
+  Server,
+  AlertTriangle,
+  GitGraph,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const NAV: { tab: AdminTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+const NAV: { tab: AdminTab; label: string; icon: React.ComponentType<{ className?: string }>; section?: string }[] = [
   { tab: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { tab: "incidents", label: "Incidents", icon: ListFilter },
   { tab: "map", label: "India Map", icon: Map },
   { tab: "analytics", label: "Analytics", icon: BarChart3 },
+  { tab: "integrations", label: "Integration Hub", icon: Network, section: "INTEROPERABILITY" },
+  { tab: "cases", label: "Unified Cases", icon: FolderKanban },
+  { tab: "data-quality", label: "Data Quality Engine", icon: ShieldCheck },
+  { tab: "consent", label: "Citizen Consent", icon: FileCheck },
+  { tab: "master-data", label: "Master Data & Entities", icon: Server },
+  { tab: "failures", label: "Retry & Dead-Letter", icon: AlertTriangle },
+  { tab: "graph", label: "Problem Graph", icon: GitGraph },
+  { tab: "insights", label: "AI Insights", icon: BrainCircuit, section: "INTELLIGENCE & AUDIT" },
+  { tab: "sla", label: "SLA Monitor", icon: Clock },
+  { tab: "audit", label: "Audit Trail", icon: ScrollText },
 ];
 
 export function AdminLayout({ tab, children }: { tab: AdminTab; children: React.ReactNode }) {
@@ -66,22 +86,28 @@ export function AdminLayout({ tab, children }: { tab: AdminTab; children: React.
             </div>
           </div>
         </div>
-        <nav className="flex-1 space-y-1 p-3" aria-label="Admin navigation">
+        <nav className="flex-1 space-y-0.5 overflow-y-auto p-3" aria-label="Admin navigation">
           {NAV.map((n) => (
-            <button
-              key={n.tab}
-              onClick={() => setView({ name: "admin", tab: n.tab })}
-              className={cn(
-                "flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                tab === n.tab
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+            <div key={n.tab}>
+              {n.section && (
+                <div className="mb-1 mt-4 px-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 first:mt-0">
+                  {n.section}
+                </div>
               )}
-              aria-current={tab === n.tab ? "page" : undefined}
-            >
-              <n.icon className="h-4.5 w-4.5" />
-              {n.label}
-            </button>
+              <button
+                onClick={() => setView({ name: "admin", tab: n.tab })}
+                className={cn(
+                  "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  tab === n.tab
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                )}
+                aria-current={tab === n.tab ? "page" : undefined}
+              >
+                <n.icon className="h-4.5 w-4.5" />
+                {n.label}
+              </button>
+            </div>
           ))}
         </nav>
         <div className="border-t p-3">

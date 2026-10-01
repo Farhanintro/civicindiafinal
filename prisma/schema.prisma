@@ -109,6 +109,10 @@ model Incident {
   notifications       Notification[]
   resolutionEvidences ResolutionEvidence[]
   incidentReports     IncidentReport[]
+  unifiedCaseLinks    UnifiedCaseLink[]
+  slaTrackers         SlaTracker[]
+  auditLogs           AuditLog[]
+  rootCauseAnalyses   RootCauseAnalysis[]
 
   @@index([status])
   @@index([categoryKey])
@@ -219,4 +223,431 @@ model VerificationToken {
   createdAt DateTime @default(now())
 
   @@index([email])
+}
+
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║  CIVIC INDIA 2.0 — Government Interoperability Layer           ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
+// Registry of connected (or simulated) government digital platforms
+model GovernmentSystem {
+  id              String           @id @default(cuid())
+  code            String           @unique // e.g. "MUN_PORTAL", "STATE_GRIEVANCE"
+  name            String           // "Municipal Complaint Portal"
+  type            String           // MUNICIPAL | STATE | DEPARTMENT | CENTRAL
+  department      String?          // owning department
+  baseUrl         String?          // API base URL (null for simulated)
+  apiKey          String?          // placeholder — never hardcoded secrets
+  webhookUrl      String?          // inbound webhook endpoint
+  dataMapping     String           @default("{}") // JSON: field mapping from source → common schema
+  status          String           @default("ONLINE") // ONLINE | OFFLINE | DEGRADED | MAINTENANCE
+  isSimulated     Boolean          @default(true) // clearly labelled: real vs simulated
+  lastSyncAt      DateTime?
+  lastHealthCheck DateTime?
+  healthLatencyMs Int?
+  requestCount    Int              @default(0)
+  failedCount     Int              @default(0)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  integrationLogs IntegrationLog[]
+  unifiedCaseLinks UnifiedCaseLink[]
+  dataQualityResults DataQualityResult[]
+  retryQueueItems RetryQueue[]
+
+  @@index([status])
+}
+
+// Log of every API call / webhook event / sync operation with external systems
+model IntegrationLog {
+  id               String           @id @default(cuid())
+  systemId         String
+  system           GovernmentSystem @relation(fields: [systemId], references: [id])
+  direction        String           // INBOUND | OUTBOUND
+  method           String           // GET | POST | WEBHOOK | SYNC
+  endpoint         String           // API path or webhook event
+  requestPayload   String?          // truncated JSON for observability
+  responsePayload  String?
+  statusCode       Int?
+  success          Boolean          @default(true)
+  errorMessage     String?
+  latencyMs        Int?
+  createdAt        DateTime         @default(now())
+
+  @@index([systemId])
+  @@index([createdAt])
+  @@index([success])
+}
+
+// Unified Civic Case — the core interoperability entity.
+// One case aggregates complaints from multiple government systems + citizen reports
+// into a single actionable civic case with a universal tracking ID.
+model UnifiedCase {
+  id                 String            @id @default(cuid())
+  caseId             String            @unique // CIVIC-2026-000001
+  correlationId      String?           // CIVIC-TRACE-2026-XXXXXX
+  title              String
+  description        String?
+  categoryKey        String?
+  severity           String            @default("MEDIUM")
+  priority           String            @default("P3")
+  priorityScore      Int               @default(0)
+  priorityReasons    String            @default("[]") // JSON
+  departmentKey      String?
+  departmentReason   String?           // AI explanation for department routing
+  latitude           Float?
+  longitude          Float?
+  address            String?
+  city               String?
+  district           String?
+  state              String?
+  status             String            @default("OPEN") // OPEN | INVESTIGATING | IN_PROGRESS | RESOLVED | CLOSED | ESCALATED
+  sourceCount        Int               @default(1) // how many source systems reported this
+  complaintCount     Int               @default(1) // total linked complaints
+  matchConfidence    Float?            // AI duplicate match confidence
+  matchReasons       String            @default("[]") // JSON: explainable match reasons
+  isRecurring        Boolean           @default(false)
+  recurrenceCount    Int               @default(0)
+  resolvedAt         DateTime?
+  closedAt           DateTime?
+  slaDeadline        DateTime?
+  slaBreached        Boolean           @default(false)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  links              UnifiedCaseLink[]
+  slaTrackers        SlaTracker[]
+  auditLogs          AuditLog[]
+  rootCauseAnalyses  RootCauseAnalysis[]
+  civicInsights      CivicInsight[]
+  workflowInstance   WorkflowInstance?
+
+  @@index([status])
+  @@index([caseId])
+  @@index([categoryKey])
+  @@index([departmentKey])
+  @@index([slaBreached])
+  @@index([createdAt])
+}
+
+// Links original complaint IDs from source systems to the unified case
+model UnifiedCaseLink {
+  id                 String            @id @default(cuid())
+  unifiedCaseId      String
+  unifiedCase        UnifiedCase       @relation(fields: [unifiedCaseId], references: [id])
+  sourceSystemId     String?
+  sourceSystem       GovernmentSystem? @relation(fields: [sourceSystemId], references: [id])
+  sourceComplaintId  String            // original ID in the source system (e.g. MUN-1938)
+  incidentId         String?           // link to our Incident if it exists
+  incident           Incident?         @relation(fields: [incidentId], references: [id])
+  linkType           String            // PRIMARY | DUPLICATE | RELATED
+  matchConfidence    Float?
+  matchReasons       String            @default("[]") // JSON
+  citizenName        String?           // anonymized
+  citizenContact     String?           // encrypted/masked
+  originalData       String            @default("{}") // JSON: raw mapped data from source
+  createdAt          DateTime          @default(now())
+
+  @@index([unifiedCaseId])
+  @@index([sourceSystemId])
+  @@index([incidentId])
+  @@unique([sourceSystemId, sourceComplaintId])
+}
+
+// Configurable SLA rules per priority level
+model SlaConfig {
+  id              String   @id @default(cuid())
+  priority        String   @unique // P1 | P2 | P3 | P4
+  maxHours        Int      // deadline in hours
+  warningHours    Int      // when to trigger warning
+  escalationChain String   @default("[]") // JSON: ["Officer", "Supervisor", "Department Head"]
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// SLA tracker per incident/case — monitors deadlines and escalation state
+model SlaTracker {
+  id              String       @id @default(cuid())
+  incidentId      String?
+  incident        Incident?    @relation(fields: [incidentId], references: [id])
+  unifiedCaseId   String?
+  unifiedCase     UnifiedCase? @relation(fields: [unifiedCaseId], references: [id])
+  priority        String       // P1 | P2 | P3 | P4
+  startedAt       DateTime     @default(now())
+  deadlineAt      DateTime
+  warningAt       DateTime
+  status          String       @default("ACTIVE") // ACTIVE | WARNING | BREACHED | MET | PAUSED
+  escalationLevel Int          @default(0) // 0=none, 1=supervisor, 2=head
+  escalatedAt     DateTime?
+  resolvedAt      DateTime?
+  breachedAt      DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([incidentId])
+  @@index([unifiedCaseId])
+  @@index([status])
+  @@index([deadlineAt])
+}
+
+// Immutable audit log — every important system action
+model AuditLog {
+  id             String       @id @default(cuid())
+  correlationId  String?
+  entityType     String       // INCIDENT | UNIFIED_CASE | INTEGRATION | SYSTEM
+  entityId       String       // ID of the related entity
+  incidentId     String?
+  incident       Incident?    @relation(fields: [incidentId], references: [id])
+  unifiedCaseId  String?
+  unifiedCase    UnifiedCase? @relation(fields: [unifiedCaseId], references: [id])
+  action         String       // CREATED | UPDATED | LINKED | ROUTED | ESCALATED | RESOLVED | etc.
+  actorType      String       @default("SYSTEM") // SYSTEM | AI | CITIZEN | OFFICER | ADMIN
+  actorId        String?
+  actorName      String?
+  details        String       @default("{}") // JSON: structured details
+  summary        String       // human-readable one-liner
+  createdAt      DateTime     @default(now())
+
+  @@index([entityType, entityId])
+  @@index([incidentId])
+  @@index([unifiedCaseId])
+  @@index([createdAt])
+}
+
+// AI-generated civic intelligence insights
+model CivicInsight {
+  id              String       @id @default(cuid())
+  unifiedCaseId   String?
+  unifiedCase     UnifiedCase? @relation(fields: [unifiedCaseId], references: [id])
+  type            String       // TREND | HOTSPOT | RECURRING | SLA_RISK | DEPARTMENT | CORRELATION
+  title           String
+  description     String
+  severity        String       @default("INFO") // INFO | WARNING | CRITICAL
+  dataPoints      String       @default("{}") // JSON: supporting data
+  confidence      Float        @default(0.8)
+  isActive        Boolean      @default(true)
+  acknowledgedAt  DateTime?
+  createdAt       DateTime     @default(now())
+
+  @@index([type])
+  @@index([isActive])
+}
+
+// AI Root Cause Analysis
+model RootCauseAnalysis {
+  id                String       @id @default(cuid())
+  incidentId        String?
+  incident          Incident?    @relation(fields: [incidentId], references: [id])
+  unifiedCaseId     String?
+  unifiedCase       UnifiedCase? @relation(fields: [unifiedCaseId], references: [id])
+  possibleCause     String
+  evidence          String       @default("[]") // JSON array of evidence items
+  confidence        Float        @default(0.5)
+  recommendedAction String
+  previousRepairs   Int          @default(0)
+  relatedIncidents  String       @default("[]") // JSON: related incident IDs
+  isAiGenerated     Boolean      @default(true)
+  verifiedByHuman   Boolean      @default(false)
+  createdAt         DateTime     @default(now())
+
+  @@index([incidentId])
+  @@index([unifiedCaseId])
+}
+
+// ── DATA QUALITY ENGINE ──
+model DataQualityResult {
+  id                String            @id @default(cuid())
+  systemId          String?
+  system            GovernmentSystem? @relation(fields: [systemId], references: [id])
+  sourceRecordId    String
+  correlationId     String?
+  score             Int               // 0 - 100
+  status            String            // VALID | WARNING | REVIEW | REJECTED | QUARANTINED
+  errors            String            @default("[]") // JSON string array
+  warnings          String            @default("[]") // JSON string array
+  normalizedFields  String            @default("[]") // JSON string array
+  rejectedFields    String            @default("[]") // JSON string array
+  rawPayload        String            // original source JSON
+  normalizedPayload String            @default("{}") // canonical schema JSON
+  suggestedFix      String?
+  reviewedBy        String?
+  reviewedAt        DateTime?
+  checkedAt         DateTime          @default(now())
+
+  @@index([status])
+  @@index([sourceRecordId])
+  @@index([correlationId])
+}
+
+// ── MASTER DATA MANAGEMENT ──
+model MasterRoad {
+  id               String   @id @default(cuid())
+  masterCode       String   @unique // ROAD-MASTER-001
+  canonicalName    String   // "Station Road"
+  aliases          String   @default("[]") // JSON: ["Station Marg", "Railway Station Rd", "Station Street"]
+  sourceIds        String   @default("{}") // JSON: {"MUN_PORTAL": "MUN-R102", "PWD_SYSTEM": "PWD-R778", "STATE_GRIEVANCE": "STATE-R45"}
+  city             String   @default("Alwar")
+  ward             String?
+  district         String?  @default("Alwar")
+  state            String?  @default("Rajasthan")
+  owningDepartment String   @default("PWD") // PWD | MUNICIPAL
+  confidence       Float    @default(1.0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([masterCode])
+  @@index([canonicalName])
+}
+
+model MasterInfrastructure {
+  id               String   @id @default(cuid())
+  infraCode        String   @unique // INFRA-ALW-PWD-019
+  name             String   // "Station Road Storm Drain & Culvert"
+  type             String   // ROAD | DRAINAGE | LIGHTING | SEWER | BRIDGE
+  roadCode         String?  // links to MasterRoad code
+  owningDepartment String   @default("PWD")
+  maintenanceCrew  String?
+  latitude         Float?
+  longitude        Float?
+  confidence       Float    @default(0.95)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([infraCode])
+  @@index([type])
+}
+
+model MasterCitizen {
+  id            String   @id @default(cuid())
+  citizenCode   String   @unique // MCIT-ALW-0042
+  canonicalName String   // "Aarav Sharma"
+  phoneMasked   String?  // "+91 98*** **421"
+  emailMasked   String?  // "aa***@gmail.com"
+  sourceIds     String   @default("{}") // JSON: {"MUN_PORTAL": "CIT-M-991", "STATE_GRIEVANCE": "PET-S-228"}
+  city          String?  @default("Alwar")
+  isVerified    Boolean  @default(true)
+  confidence    Float    @default(0.98)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([citizenCode])
+}
+
+// ── CITIZEN CONSENT MANAGEMENT ──
+model Consent {
+  id               String         @id @default(cuid())
+  citizenId        String         // citizen publicId or master citizen code
+  citizenName      String
+  requestingSystem String         // e.g. "PWD_SYSTEM"
+  receivingSystem  String         // e.g. "MUNICIPAL_PORTAL"
+  purpose          String         // e.g. "Inter-departmental road repair verification"
+  allowedFields    String         @default("[]") // JSON: ["location", "description", "evidence"]
+  restrictedFields String         @default("[]") // JSON: ["phone", "email"]
+  status           String         @default("GRANTED") // PENDING | GRANTED | DENIED | EXPIRED | REVOKED
+  version          String         @default("v1.0")
+  consentEvidence  String?        // hash or e-sign signature dummy
+  grantedAt        DateTime?      @default(now())
+  expiresAt        DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  events           ConsentEvent[]
+
+  @@index([citizenId])
+  @@index([status])
+}
+
+model ConsentEvent {
+  id         String   @id @default(cuid())
+  consentId  String
+  consent    Consent  @relation(fields: [consentId], references: [id], onDelete: Cascade)
+  action     String   // REQUESTED | GRANTED | DENIED | REVOKED | ACCESSED
+  actor      String   // citizen name or system code
+  dataFields String   @default("[]") // fields accessed/affected
+  details    String   @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([consentId])
+  @@index([action])
+}
+
+// ── FEDERATED IDENTITY / SSO DEMO ──
+model FederatedIdentity {
+  id           String    @id @default(cuid())
+  providerCode String    // "GOVT_SSO_PARICHAY" | "CIVIC_ID_PROVIDER"
+  providerName String    // "National Parichay / Single Sign-On"
+  subjectId    String    // unique user sub in IdP
+  email        String
+  name         String
+  role         String    // CITIZEN | OFFICER | DEPARTMENT_ADMIN | GOVERNMENT_ADMIN
+  department   String?   // "PWD" | "Sanitation" | "Municipal"
+  jurisdiction String?   // "Rajasthan - Alwar District"
+  claims       String    @default("{}") // JSON claims
+  isSimulated  Boolean   @default(true) // Clearly labeled demo federated identity
+  lastLoginAt  DateTime? @default(now())
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([providerCode, subjectId])
+  @@index([email])
+}
+
+// ── EVENT-DRIVEN BUS / TRACE LOGS ──
+model IntegrationEvent {
+  id            String   @id @default(cuid())
+  eventType     String   // RECORD_RECEIVED | DATA_QUALITY_EVALUATED | MASTER_ENTITY_RESOLVED | CONSENT_VERIFIED | UNIFIED_CASE_CREATED | CASE_ROUTED | SLA_STARTED | RESOLUTION_VERIFIED
+  correlationId String   // CIVIC-TRACE-2026-XXXXXX
+  sourceSystem  String?  // MUN_PORTAL | STATE_GRIEVANCE | PWD_SYSTEM
+  entityType    String   // UNIFIED_CASE | DATA_QUALITY | INTEGRATION_QUEUE
+  entityId      String?
+  payload       String   @default("{}") // JSON
+  summary       String
+  createdAt     DateTime @default(now())
+
+  @@index([correlationId])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+// ── EXCEPTION RETRY QUEUE & DEAD-LETTER ──
+model RetryQueue {
+  id               String            @id @default(cuid())
+  systemId         String?
+  system           GovernmentSystem? @relation(fields: [systemId], references: [id])
+  sourceSystemCode String
+  sourceRecordId   String
+  correlationId    String?
+  endpoint         String
+  payload          String            // JSON payload
+  retryCount       Int               @default(0)
+  maxRetries       Int               @default(3)
+  status           String            @default("PENDING") // PENDING | RETRYING | SUCCESS | FAILED | DEAD_LETTER | QUARANTINED
+  lastError        String?
+  nextRetryAt      DateTime?
+  resolvedAt       DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([status])
+  @@index([sourceSystemCode])
+  @@index([nextRetryAt])
+}
+
+// ── WORKFLOW ENGINE ──
+model WorkflowInstance {
+  id             String       @id @default(cuid())
+  unifiedCaseId  String?      @unique
+  unifiedCase    UnifiedCase? @relation(fields: [unifiedCaseId], references: [id])
+  workflowName   String       @default("CIVIC_INTEROPERABILITY_V1")
+  currentState   String       @default("CASE_CREATED")
+  history        String       @default("[]") // JSON array of state transitions with timestamp and actor
+  assignedRole   String       @default("OFFICER")
+  assignedDept   String?
+  slaTargetHours Int          @default(24)
+  escalationTier Int          @default(0)
+  isCompleted    Boolean      @default(false)
+  completedAt    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([currentState])
 }

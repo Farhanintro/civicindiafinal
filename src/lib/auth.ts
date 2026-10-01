@@ -287,7 +287,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
           id: user.id,
           publicId: user.publicId,
           name: user.name,
-          email: user.email,
+          email: user.email ?? "",
           role: user.role,
         };
       }
@@ -342,7 +342,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
       id: user.id,
       publicId: user.publicId,
       name: user.name,
-      email: user.email,
+      email: user.email ?? "",
       role: user.role,
     };
   } catch {

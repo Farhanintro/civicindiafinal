@@ -183,7 +183,7 @@ export function IncidentView({ publicId: propPublicId }: IncidentViewProps = {})
             <div className="relative aspect-video w-full bg-muted">
               <Photo
                 src={primaryImage}
-                alt={incident.title}
+                alt={incident.title || incident.categoryLabel || "Incident evidence photo"}
                 fill
                 className="object-cover"
               />

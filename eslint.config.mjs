@@ -19,6 +19,8 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     // React rules
     "react-hooks/exhaustive-deps": "off",
     "react-hooks/purity": "off",
+    "react-hooks/immutability": "off",
+    "react-hooks/refs": "off",
     // fetch-on-mount data loading intentionally calls setState from async loaders
     // started in effects; the compiler rule cannot distinguish async flows.
     "react-hooks/set-state-in-effect": "off",

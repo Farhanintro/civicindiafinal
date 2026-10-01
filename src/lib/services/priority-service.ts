@@ -1,5 +1,11 @@
 // Civic India — deterministic priority assessment engine.
-import type { Priority, PriorityScoreBreakdown, Severity } from "@/lib/civiclens/types";
+import type { Priority, Severity } from "@/lib/civiclens/types";
+
+export interface PriorityScoreBreakdown {
+  score: number;
+  priority: Priority;
+  reasons: string[];
+}
 
 export interface PriorityInput {
   categoryKey?: string;

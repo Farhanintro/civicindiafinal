@@ -30,8 +30,59 @@ const AdminMapSafe = dynamic(() => import("./admin/map").then((m) => m.AdminMap)
   loading: () => <MapSkeleton />,
 });
 
+// CIVIC INDIA 2.0 modules (code-split for performance)
+const IntegrationHub = dynamic(() => import("./admin/integration-hub").then((m) => m.IntegrationHub), {
+  ssr: false,
+  loading: () => <ModuleSkeleton label="Integration Hub" />,
+});
+const UnifiedCases = dynamic(() => import("./admin/unified-cases").then((m) => m.UnifiedCases), {
+  ssr: false,
+  loading: () => <ModuleSkeleton label="Unified Cases" />,
+});
+const AiInsights = dynamic(() => import("./admin/ai-insights").then((m) => m.AiInsights), {
+  ssr: false,
+  loading: () => <ModuleSkeleton label="AI Insights" />,
+});
+const SlaMonitor = dynamic(() => import("./admin/sla-monitor").then((m) => m.SlaMonitor), {
+  ssr: false,
+  loading: () => <ModuleSkeleton label="SLA Monitor" />,
+});
+const AuditTrail = dynamic(() => import("./admin/audit-trail").then((m) => m.AuditTrail), {
+  ssr: false,
+  loading: () => <ModuleSkeleton label="Audit Trail" />,
+});
+const DataQualityDashboard = dynamic(() => import("./admin/data-quality").then((m) => m.DataQualityDashboard), {
+  ssr: false,
+  loading: () => <ModuleSkeleton label="Data Quality Engine" />,
+});
+const ConsentDashboard = dynamic(() => import("./admin/consent-dashboard").then((m) => m.ConsentDashboard), {
+  ssr: false,
+  loading: () => <ModuleSkeleton label="Citizen Consent Governance" />,
+});
+const MasterDataDashboard = dynamic(() => import("./admin/master-data").then((m) => m.MasterDataDashboard), {
+  ssr: false,
+  loading: () => <ModuleSkeleton label="Master Data Registry" />,
+});
+const IntegrationFailuresDashboard = dynamic(() => import("./admin/integration-failures").then((m) => m.IntegrationFailuresDashboard), {
+  ssr: false,
+  loading: () => <ModuleSkeleton label="Retry & Dead-Letter Queue" />,
+});
+const CivicProblemGraph = dynamic(() => import("./admin/problem-graph").then((m) => m.CivicProblemGraph), {
+  ssr: false,
+  loading: () => <ModuleSkeleton label="Civic Problem Graph" />,
+});
+
 function MapSkeleton() {
   return <Skeleton className="h-full w-full rounded-none" />;
+}
+
+function ModuleSkeleton({ label }: { label: string }) {
+  return (
+    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 p-8">
+      <Skeleton className="h-1 w-40" />
+      <p className="text-sm text-muted-foreground">Loading {label}…</p>
+    </div>
+  );
 }
 
 function Splash() {
@@ -125,6 +176,16 @@ function CivicLensInner() {
             {tab === "incidents" ? <AdminIncidents /> : null}
             {tab === "map" ? <AdminMapSafe /> : null}
             {tab === "analytics" ? <AdminAnalytics /> : null}
+            {tab === "integrations" ? <IntegrationHub /> : null}
+            {tab === "cases" ? <UnifiedCases /> : null}
+            {tab === "data-quality" ? <DataQualityDashboard /> : null}
+            {tab === "consent" ? <ConsentDashboard /> : null}
+            {tab === "master-data" ? <MasterDataDashboard /> : null}
+            {tab === "failures" ? <IntegrationFailuresDashboard /> : null}
+            {tab === "graph" ? <CivicProblemGraph /> : null}
+            {tab === "insights" ? <AiInsights /> : null}
+            {tab === "sla" ? <SlaMonitor /> : null}
+            {tab === "audit" ? <AuditTrail /> : null}
           </AdminLayout>
         );
       }

@@ -161,7 +161,7 @@ export async function POST(req: Request) {
 
     await db.verificationToken.create({
       data: {
-        email: user.email,
+        email: user.email!,
         token: verificationToken,
         expiresAt,
       },
@@ -172,7 +172,7 @@ export async function POST(req: Request) {
      */
     try {
       await sendVerificationEmail(
-        user.email,
+        user.email!,
         verificationToken
       );
     } catch (mailError) {

@@ -20,7 +20,18 @@ export type AdminTab =
   | "dashboard"
   | "incidents"
   | "map"
-  | "analytics";
+  | "analytics"
+  | "integrations"
+  | "cases"
+  | "data-quality"
+  | "consent"
+  | "master-data"
+  | "failures"
+  | "graph"
+  | "insights"
+  | "sla"
+  | "audit";
+
 
 export type View =
   | { name: "landing" }
